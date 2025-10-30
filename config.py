@@ -23,6 +23,18 @@ RPC_RETRY_INTERVAL_SEC: Second = Second(0.5)
 # Consider to increase or decrease based on your network quality
 BLOCKCHAIN_LOG_EVENT_POLL_INTERVAL_SEC: Second = Second(600)
 
+# Number of blocks to query per request when polling blockchain log events
+# Adjust based on the restrictions of your RPC provider
+BLOCKCHAIN_LOG_EVENT_POLL_BLOCKS_PER_REQUEST: dict[ChainID, int] = {
+    ChainID.ETHEREUM : 10000,
+    ChainID.OPTIMISM : 10000,
+    ChainID.BSC      : 10000,
+    ChainID.POLYGON  : 100,
+    ChainID.ARBITRUM : 10000,
+    ChainID.AVALANCHE: 10000,
+    ChainID.SEPOLIA  : 10000,
+}
+
 # Relayer fee rate in percentage, e.g., '1.8' means 1.8%
 # Increase this value manually if relayer rejects your request
 RELAYER_FEE_RATE: str = '1.8'
