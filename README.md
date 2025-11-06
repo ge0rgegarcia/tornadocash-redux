@@ -2,6 +2,7 @@
 [![Docs](https://img.shields.io/badge/docs-README-blue)](https://github.com/ge0rgegarcia/tornadocash-redux#readme)
 [![GitHub stars](https://img.shields.io/github/stars/ge0rgegarcia/tornadocash-redux?style=flat)](https://github.com/ge0rgegarcia/tornadocash-redux/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/ge0rgegarcia/tornadocash-redux)](https://github.com/ge0rgegarcia/tornadocash-redux/issues)
+[![Python application](https://github.com/ge0rgegarcia/tornadocash-redux/actions/workflows/python-app.yml/badge.svg?branch=main)](https://github.com/ge0rgegarcia/tornadocash-redux/actions/workflows/python-app.yml)
 
 
 *__Security Warnings__*  
