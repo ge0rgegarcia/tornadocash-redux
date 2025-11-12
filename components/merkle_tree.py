@@ -4,8 +4,8 @@ from zkmath import field
 from zkmath import hash
 import threading
 
-import log
-from mytype import MerkleProof
+from . import log
+from .mytype import MerkleProof
 
 
 class ImplType(Enum):

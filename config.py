@@ -1,6 +1,6 @@
 import os
 
-from mytype import ChainID, Second, Symbol, TornadoUnit, chain_to_string
+from components.mytype import ChainID, Second, Symbol, TornadoUnit, chain_to_string
 
 
 # ============================================== User Configurations ===================================================
