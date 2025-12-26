@@ -90,11 +90,9 @@ Or, sync all deployments:
 
 It is recommended to keep the program running to stay synchronized with the blockchain, simply add a `--keep` option to `--sync` or `--sync_all` command.  
 
-### RPC Service (Optional)
+### RPC Service
 
-For blockchain interaction, `publicnode.com` was used as the default RPC provider, technically it should be enough for most users.  
-
-For better experience or if you want to set up your own RPC provider, replace the `RPC_URLS` variable in `config.py` with your own endpoint.  
+If RPC error `ADDRESS_SANCTIONED` occurs during deposit or withdrawal, or any RPC errors during the syncing process, please change to another RPC provider manually, replace the `RPC_URLS` variable in `config.py` with your own endpoint.  
 
 ![](/assets/readme_rpc.png)
 
