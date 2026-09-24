@@ -1,1 +1,6 @@
 zk/js/*.js linguist-generated=true
+
+zk/groth16/_witness_program.py linguist-generated=true
+zk/tornado/circuit.json -text
+zk/tornado/proving_key.bin -text
+zk/tornado/verification_key.json -text

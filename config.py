@@ -35,6 +35,12 @@ BLOCKCHAIN_LOG_EVENT_POLL_BLOCKS_PER_REQUEST: dict[ChainID, int] = {
     ChainID.SEPOLIA  : 10000,
 }
 
+# Zero-knowledge proof backend: "python" (default) or "javascript" (legacy).
+ZK_BACKEND: str = "python"
+
+# Only for Python backend, number of Groth16 prover threads, from 1 to 8.
+ZK_WORKERS: int = 8
+
 # Relayer fee rate in percentage, e.g., '1.8' means 1.8%
 # Increase this value manually if relayer rejects your request
 RELAYER_FEE_RATE: str = '1.8'
