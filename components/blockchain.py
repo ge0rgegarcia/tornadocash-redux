@@ -1,12 +1,15 @@
 import threading
+import time
 from abc import ABC, abstractmethod
+from enum import Enum
+from typing import Callable
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.types import LogReceipt, Wei
 
 from . import log, rpc, util
-from .mytype import ChainID, chain_to_string
+from .mytype import ChainID, Second, chain_to_string
 from .util import upper_first_char
 import config
 
@@ -136,6 +139,13 @@ class EventWithdraw(LogEvent):
 
 class EventPoller(object):
 
+    class Activity(Enum):
+        IDLE            = 'idle'
+        FETCHING_HEAD   = 'fetching_head'
+        FETCHING_EVENTS = 'fetching_events'
+        RETRY_WAIT      = 'retry_wait'
+        PERSISTING      = 'persisting'
+
     class Handler(object):
 
         def on_first_catchup(self) -> None:
@@ -150,19 +160,29 @@ class EventPoller(object):
             """Called when the latest block number is updated."""
             pass
 
-    def __init__(self, chain: ChainID, connection: rpc.Interface | None = None) -> None:
-        self.tag        : str                       = f'{__class__.__name__}@{upper_first_char(chain_to_string(chain))}'
-        self.off        : bool                      = True
-        self.chain      : ChainID                   = chain
-        self.connection : rpc.Interface | None      = connection  # If True, the RPC connection is managed outside
-        self.external   : bool                      = connection is not None
-        self.meta       : util.Metadata             = util.load_metadata()[chain]
-        self.contract   : ChecksumAddress | None    = None
-        self.events     : list[LogEvent]            = [EventDeposit(), EventWithdraw()]
-        self.current    : int                       = 0
-        self.cond       : threading.Condition       = threading.Condition()
-        self.worker     : threading.Thread | None   = None
-        self.handlers    : list[EventPoller.Handler] = []
+    def __init__(self, chain: ChainID, connection: rpc.Interface | None = None, poll_interval: float | None = None) -> None:
+        self.tag           : str                       = f'{__class__.__name__}@{upper_first_char(chain_to_string(chain))}'
+        self.off           : bool                      = True
+        self.chain         : ChainID                   = chain
+        self.connection    : rpc.Interface | None      = connection  # If True, the RPC connection is managed outside
+        self.external      : bool                      = connection is not None
+        self.meta          : util.Metadata             = util.load_metadata()[chain]
+        self.contract      : ChecksumAddress | None    = None
+        self.events        : list[LogEvent]            = [EventDeposit(), EventWithdraw()]
+        self.current       : int                       = 0
+        self.cond          : threading.Condition       = threading.Condition()
+        self.worker        : threading.Thread | None   = None
+        self.handlers      : list[EventPoller.Handler] = []
+        self.poll_interval : float                     = config.BLOCKCHAIN_LOG_EVENT_POLL_INTERVAL_SEC if poll_interval is None else poll_interval
+        self.start_block   : int                       = 0
+        self.latest_block  : int | None                = None
+        self.last_check_sec: float | None              = None
+        self.error         : str | None                = None
+        self.activity      : EventPoller.Activity      = EventPoller.Activity.IDLE
+        self.caught_up     : bool                      = False
+        self.refresh_needed: bool                      = False
+        self.deposits      : int                       = 0
+        self.withdrawals   : int                       = 0
         if self.connection is None:
             self.connection = rpc.Connection(self.chain, config.RPC_URLS[self.chain])
 
@@ -175,6 +195,8 @@ class EventPoller(object):
         if not self.off:
             log.warn(self.tag, 'start() already started')
             return False
+        if self.worker is not None:
+            self.stop()
         if not self.external:
             if not self.connection.start():
                 log.error(self.tag, f'Failed to start RPC connection for {self.chain}')
@@ -182,32 +204,91 @@ class EventPoller(object):
         elif not self.connection.started():
             log.error(self.tag, 'The external RPC connection is not started')
             return False
-        self.off      = False
-        self.contract = contract
-        self.current  = start_block
-        self.worker   = threading.Thread(target=self._loop)
+        with self.cond:
+            self.off            = False
+            self.contract       = contract
+            self.current        = self.start_block = start_block
+            self.latest_block   = self.last_check_sec = self.error = None
+            self.caught_up      = False
+            self.refresh_needed = False
+            self.activity       = EventPoller.Activity.FETCHING_HEAD
+            self.deposits       = self.withdrawals = 0
+            self.cond.notify_all()
+        self.worker = threading.Thread(target=self._loop)
         self.worker.start()
         log.debug(self.tag, f'start(contract={contract}, start_block={start_block}, events={[e.event_name() for e in self.events]})')
         return True
 
     def stop(self) -> None:
-        if self.off:
+        if self.off and self.worker is None:
             log.warn(self.tag, 'stop() already stopped')
             return
         log.debug(self.tag, 'stop() shutting down')
-        self.off = True
         with self.cond:
+            self.off = True
             self.cond.notify_all()
         self.worker.join()
         if not self.external:
             if self.connection.started():
                 self.connection.stop()
-        self.worker     = None
-        self.contract   = None
+        self.worker   = None
+        self.contract = None
         log.debug(self.tag, 'stop() done')
 
     def is_started(self) -> bool:
         return not self.off
+
+    def wait_sync(self, cancel: Callable[[], bool] | None = None, refresh: bool = False) -> bool:
+        """Wait for a fresh persisted head; cancel only checks flags, refresh requests a new head."""
+        with self.cond:
+            while not self.off:
+                if cancel is not None and cancel():
+                    return False
+                sync      : dict         = self.status()
+                last_check: float | None = sync['last_check_sec']
+                fresh     : bool         = last_check is not None and time.time() - last_check <= 60
+                if sync['synchronized'] and fresh and not refresh:
+                    return True
+                if (refresh or (not fresh and self.activity != EventPoller.Activity.FETCHING_HEAD)) and not self.refresh_needed:
+                    self.refresh_needed = True
+                    self.caught_up      = False
+                    if sync['synchronized'] and self.activity == EventPoller.Activity.IDLE:
+                        self.cond.notify_all()
+                refresh = False
+                self.cond.wait(0.5)
+            return False
+
+    def status(self) -> dict:
+        """Progress advances only after the synchronization handlers succeed."""
+        with self.cond:
+            synced   : int | None = None if self.latest_block is None else self.current - 1
+            remaining: int | None = None if self.latest_block is None else max(0, self.latest_block - self.current + 1)
+            if self.off:
+                phase: str = 'error' if self.error else 'stopped'
+            elif self.error:
+                phase = 'retrying'
+            elif self.latest_block is None:
+                phase = 'connecting'
+            else:
+                phase = 'ready' if self.caught_up and remaining == 0 and not self.refresh_needed else 'syncing'
+            progress: float | None = None
+            if phase in ('syncing', 'ready'):
+                progress = float(synced >= 0) if self.latest_block == 0 else min(1.0, max(0.0, synced / self.latest_block))
+            return {
+                'running'         : not self.off,
+                'phase'           : phase,
+                'activity'        : self.activity.value,
+                'start_block'     : self.start_block,
+                'synced_block'    : synced,
+                'latest_block'    : self.latest_block,
+                'remaining_blocks': remaining,
+                'progress'        : progress,
+                'synchronized'    : phase == 'ready',
+                'last_check_sec'  : self.last_check_sec,
+                'error'           : self.error,
+                'deposits'        : self.deposits,
+                'withdrawals'     : self.withdrawals,
+            }
 
     def add_handler(self, handler: Handler) -> None:
         with self.cond:
@@ -218,18 +299,50 @@ class EventPoller(object):
             self.handlers.clear()
 
     def _loop(self) -> None:
+        try:
+            self._poll()
+        except Exception:
+            with self.cond:
+                self.error = 'Synchronization failed.'
+                self.off   = True
+                self.cond.notify_all()
+            log.error(self.tag, self.error)
+        finally:
+            with self.cond:
+                self.off      = True
+                self.activity = EventPoller.Activity.IDLE
+                self.cond.notify_all()
+            if not self.external and self.connection.started():
+                self.connection.stop()
+
+    def _poll(self) -> None:
         first_loop: bool = True
         while not self.off:
             latest: int | rpc.Error = 0
             # Get latest block number
             while not self.off:
+                with self.cond:
+                    self.activity       = EventPoller.Activity.FETCHING_HEAD
+                    self.refresh_needed = False
                 latest = self.connection.latest_block_number()
                 if not rpc.is_error(latest):
                     break
-                log.error(self.tag, f'Failed to get latest block number, RPC error: {latest.code.value}')
+                with self.cond:
+                    self.error    = latest.code.value
+                    self.activity = EventPoller.Activity.RETRY_WAIT
+                    self.cond.notify_all()
+                log.error(self.tag, f'Failed to get latest block number, RPC error: {self.error}')
                 log.info(self.tag, f'Wait {config.RPC_RETRY_INTERVAL_SEC}s and retry')
                 util.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
-            count_block: int = latest - self.current + 1
+            if self.off:
+                break
+            with self.cond:
+                self.latest_block   = latest
+                self.last_check_sec = time.time()
+                self.error          = None
+                self.activity       = EventPoller.Activity.IDLE
+                self.cond.notify_all()
+            count_block: int = max(0, latest - self.current + 1)
 
             # Notify latest block number
             for h in self.handlers:
@@ -259,15 +372,27 @@ class EventPoller(object):
                 # Get event logs
                 event_logs: list[LogReceipt] = []
                 for expected in self.events:
+                    with self.cond:
+                        self.activity = EventPoller.Activity.FETCHING_EVENTS
                     result: list[LogReceipt] | rpc.Error = self.connection.log_receipt(ChecksumAddress(self.contract), chunk[0], chunk[1], [expected.event_hash()])
                     while not self.off:
                         if not rpc.is_error(result):
                             break
-                        log.error(self.tag, f'Failed to get logs for event {expected.event_hash().to_0x_hex()}, RPC error: {result.code.value}')
+                        with self.cond:
+                            self.error    = result.code.value
+                            self.activity = EventPoller.Activity.RETRY_WAIT
+                            self.cond.notify_all()
+                        log.error(self.tag, f'Failed to get logs for event {expected.event_hash().to_0x_hex()}, RPC error: {self.error}')
                         log.info(self.tag, f'Wait {config.RPC_RETRY_INTERVAL_SEC}s and retry')
                         util.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                        with self.cond:
+                            self.activity = EventPoller.Activity.FETCHING_EVENTS
                         result = self.connection.log_receipt(ChecksumAddress(self.contract), chunk[0], chunk[1], [expected.event_hash()])
                     if not rpc.is_error(result):
+                        with self.cond:
+                            self.error    = None
+                            self.activity = EventPoller.Activity.IDLE
+                            self.cond.notify_all()
                         event_logs.extend(result if result is not None else [])
                     if self.off:
                         break
@@ -305,11 +430,17 @@ class EventPoller(object):
                                     f'contract {self.contract}, deposit: {count_deposit}, withdraw: {count_withdraw}')
 
                 # Callback and update
+                with self.cond:
+                    self.activity = EventPoller.Activity.PERSISTING
                 for h in self.handlers:
                     h.on_sync(chunk[0], chunk[1], deposits, withdrawals)
-            # Update current block number
+                with self.cond:
+                    self.current = chunk[1] + 1
+                    self.deposits    += count_deposit
+                    self.withdrawals += count_withdraw
+                    self.activity = EventPoller.Activity.IDLE
+                    self.cond.notify_all()
             if not break_early:
-                self.current = latest + 1
                 # Notify latest block number
                 for h in self.handlers:
                     h.on_latest_block(latest)
@@ -319,6 +450,11 @@ class EventPoller(object):
                     log.info(self.tag, f'Synced to block {latest}')
                     for h in self.handlers:
                         h.on_first_catchup()
+                with self.cond:
+                    self.caught_up = not self.refresh_needed
+                    self.error     = None
+                    self.activity  = EventPoller.Activity.IDLE
+                    self.cond.notify_all()
                 # Sleep interval if no new block
-                if not self.off:
-                    util.wait(config.BLOCKCHAIN_LOG_EVENT_POLL_INTERVAL_SEC, self.cond)
+                with self.cond:
+                    self.cond.wait_for(lambda: self.off or self.refresh_needed, timeout=Second(self.poll_interval))

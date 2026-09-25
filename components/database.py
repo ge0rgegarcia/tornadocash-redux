@@ -80,6 +80,9 @@ class Interface(object):
     def get_commitments(self) -> list[HexBytes] | None:
         raise NotImplementedError
 
+    def get_event_counts(self) -> tuple[int, int] | None:
+        raise NotImplementedError
+
     '''
     Add synchronized events in batch
     @param  block_number    Latest synced block number, will not be updated if less or equal to current value
@@ -104,12 +107,12 @@ class SQLite(Interface):
 
     def __init__(self):
         super().__init__(Backend.SQLITE)
-        self.TAG: str = __class__.__name__
-        self.mutex      : threading.Lock            = threading.Lock()
-        self.opened     : bool                      = False
-        self.taskq      : Queue                     = Queue()
-        self.connection : sqlite3.Connection | None = None
-        self.cursor     : sqlite3.Cursor | None     = None
+        self.TAG       : str                       = __class__.__name__
+        self.mutex     : threading.Lock            = threading.Lock()
+        self.opened    : bool                      = False
+        self.taskq     : Queue                     = Queue()
+        self.connection: sqlite3.Connection | None = None
+        self.cursor    : sqlite3.Cursor | None     = None
 
     def open(self, chain: ChainID, symbol: Symbol, unit: TornadoUnit) -> bool:
         meta: Metadata = util.load_metadata()[chain]
@@ -209,6 +212,11 @@ class SQLite(Interface):
             if result is None:
                 return None
             return [HexBytes.fromhex(x[0][2:] if x[0].startswith('0x') else x[0]) for x in result]
+
+    def get_event_counts(self) -> tuple[int, int] | None:
+        with self.mutex:
+            rows: list[tuple[int, int]] | None = self._query('SELECT (SELECT COUNT(*) FROM t_event_deposit), (SELECT COUNT(*) FROM t_event_withdraw);')
+        return tuple(rows[0]) if rows else None
 
     def add_synchronized(self, block_number: int, deposits: list[blockchain.EventDeposit], withdrawals: list[
         blockchain.EventWithdraw]) -> bool:
