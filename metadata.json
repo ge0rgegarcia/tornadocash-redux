@@ -196,6 +196,22 @@
                 "10" : 5594402
             },
             "decimals": 18
+        },
+        "dai": {
+            "deployed_address": {
+                "100"   : "0x6921fd1a97441dd603a997ED6DDF388658daf754",
+                "1000"  : "0x50a637770F5d161999420F7d70d888DE47207145",
+                "10000" : "0xecD649870407cD43923A816Cc6334a5bdf113621",
+                "100000": "0x73B4BD04bF83206B6e979BE2507098F92EDf4F90"
+            },
+            "deployed_block_number": {
+                "100"   : 5594406,
+                "1000"  : 5594407,
+                "10000" : 5594408,
+                "100000": 5594410
+            },
+            "decimals": 18,
+            "token_address": "0xFF34B3d4Aee8ddCd6F9AFFFB6Fe49bD371b8a357"
         }
     }
 }
