@@ -425,35 +425,35 @@ def sync_all_events(keep: bool) -> None:
     _stop_all_rpc()
 
 
+def _save_deposit_note(tornado: Tornado, note: Note, index: int | None = None) -> str | None:
+    suffix: str = f'_{index}' if index is not None else ''
+    filename: str = f'{datetime.now().strftime("%Y-%m-%d_%H.%M.%S.%f")[:-3]}_{chain_to_string(tornado.chain)}_{tornado.symbol.value}_{tornado.unit.value}{suffix}.txt'
+    backup_path: str = os.path.abspath(os.path.join(config.BACKUP_DIR, filename)).replace('\\', '/')
+    backup_str        : str = Note.to_text(tornado.chain, tornado.symbol, tornado.unit, note)
+    invoice_str       : str = Note.to_invoice(tornado.chain, tornado.symbol, tornado.unit, note)
+    nullifier_hash_str: str = f'{chain_to_string(tornado.chain)}-{tornado.symbol.value}-{tornado.unit.value}-{note.nullifier_hash.hex().zfill(64)}'
+    try:
+        if not os.path.exists(config.BACKUP_DIR):
+            os.makedirs(config.BACKUP_DIR, exist_ok=True)
+        with open(backup_path, 'w') as f:
+            f.write(f'Note: {backup_str}\n')
+            f.write(f'Invoice: {invoice_str}\n')
+            f.write(f'NullifierHash: {nullifier_hash_str}\n')
+    except Exception as e:
+        log.error(tag, f'Failed to save note to file: {e}')
+        return None
+    log.info(tag, f'IMPORTANT: Please save the note text below and keep it private', log.Color.YELLOW, log.Style.BOLD)
+    log.info(tag, f'IMPORTANT: {backup_str}', log.Color.YELLOW, log.Style.BOLD)
+    return backup_path
+
+
 def _deposit(key: Key, tornado: Tornado, invoice: HexBytes | None = None) -> HexBytes | None:
     log.info(tag, f'Depositing {util.upper_first_char(chain_to_string(tornado.chain))} {tornado.unit.value} {tornado.symbol.value.upper()}')
-    # Create a note or parse the invoice
-    if invoice is None:
-        note      : Note | None = Note.create()
-        commitment: HexBytes    = note.commitment
-    else:
-        note      : Note | None = None
-        commitment: HexBytes    = invoice
-    # Save the note to a file
-    filename   : str = f'{datetime.now().strftime("%Y-%m-%d_%H.%M.%S.%f")[:-3]}_{chain_to_string(tornado.chain)}_{tornado.symbol.value}_{tornado.unit.value}.txt'
-    backup_path: str = os.path.join(config.BACKUP_DIR, filename).replace('\\', '/')
-    if note is not None:
-        backup_str        : str  = Note.to_text(tornado.chain, tornado.symbol, tornado.unit, note)
-        invoice_str       : str  = Note.to_invoice(tornado.chain, tornado.symbol, tornado.unit, note)
-        nullifier_hash_str: str  = f'{chain_to_string(tornado.chain)}-{tornado.symbol.value}-{tornado.unit.value}-{note.nullifier_hash.hex().zfill(64)}'
-        try:
-            if not os.path.exists(config.BACKUP_DIR):
-                os.makedirs(config.BACKUP_DIR, exist_ok=True)
-            with open(backup_path, 'w') as f:
-                f.write(f'Note: {backup_str}\n')
-                f.write(f'Invoice: {invoice_str}\n')
-                f.write(f'NullifierHash: {nullifier_hash_str}\n')
-        except Exception as e:
-            log.error(tag, f'Failed to save note to file: {e}')
-            return None
-        log.info(tag, f'IMPORTANT: Please save the note text below and keep it private', log.Color.YELLOW, log.Style.BOLD)
-        log.info(tag, f'IMPORTANT: {backup_str}', log.Color.YELLOW, log.Style.BOLD)
-    # Deposit
+    note: Note | None = Note.create() if invoice is None else None
+    commitment: HexBytes = note.commitment if note is not None else invoice
+    backup_path: str | None = _save_deposit_note(tornado, note) if note is not None else None
+    if note is not None and backup_path is None:
+        return None
     tx_hash: HexBytes | None = tornado.deposit(commitment, key)
     if note is not None:
         if tx_hash is None:  # Transaction failed, remove the backup file
@@ -663,7 +663,7 @@ def create_note(chain: ChainID, symbol: Symbol, unit: TornadoUnit) -> None:
     nullifier_hash_str: str  = f'{chain_to_string(chain)}-{symbol.value}-{unit.value}-{note.nullifier_hash.hex().zfill(64)}'
     # Save backup
     filename   : str = f'{datetime.now().strftime("%Y-%m-%d_%H.%M.%S.%f")[:-3]}_{chain_to_string(chain)}_{symbol.value}_{unit.value}.txt'
-    backup_path: str = os.path.join(config.BACKUP_DIR, filename).replace('\\', '/')
+    backup_path: str = os.path.abspath(os.path.join(config.BACKUP_DIR, filename)).replace('\\', '/')
     try:
         if not os.path.exists(config.BACKUP_DIR):
             os.makedirs(config.BACKUP_DIR, exist_ok=True)
