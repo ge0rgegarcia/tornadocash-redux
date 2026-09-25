@@ -42,12 +42,98 @@ def tornado(monkeypatch: pytest.MonkeyPatch) -> pool.Tornado:
     return instance
 
 
+def test_deposit_builds_an_unsigned_native_transaction(tornado: pool.Tornado, note: Note) -> None:
+    tx = tornado.deposit_tx(note.commitment, ACCOUNT)
+    assert tx == {'from': ACCOUNT, 'to': RECIPIENT, 'chainId': 1, 'nonce': 0, 'value': 10 ** 18, 'data': b'\x01'}
+    tornado.note_deposited.assert_not_called()
+    pool.rpc.contract_call.assert_not_called()
+    tornado.connection.sign_transaction.assert_not_called()
+    tornado.connection.send_transaction.assert_not_called()
+
+
+def test_deposit_reports_only_the_steps_it_runs(tornado: pool.Tornado, note: Note) -> None:
+    messages: list[str] = []
+    tornado.handlers = [SimpleNamespace(on_progress=messages.append)]
+
+    assert tornado.deposit_tx(note.commitment, ACCOUNT) is not None
+    assert messages == ['Fetching deposit transaction nonce', 'Building deposit transaction']
+    messages.clear()
+    assert tornado.deposit_tx(note.commitment, ACCOUNT, nonce=7) is not None
+    assert messages == ['Building deposit transaction']
+    tornado.connection.nonce.assert_called_once_with(ACCOUNT)
+
+
 def test_progress_uses_a_handler_snapshot(tornado: pool.Tornado) -> None:
     observe: Mock = Mock()
     tornado.handlers = [SimpleNamespace(on_progress=lambda _: tornado.handlers.clear()), SimpleNamespace(on_progress=observe)]
     tornado._progress('Building deposit transaction')
     observe.assert_called_once_with('Building deposit transaction')
     assert not tornado.handlers
+
+
+def test_erc20_builds_without_preflight_queries_or_automatic_approval(tornado: pool.Tornado, note: Note) -> None:
+    tornado.symbol = Symbol.DAI
+    tx = tornado.deposit_tx(note.commitment, ACCOUNT)
+    assert 'value' not in tx
+    assert pool.rpc.contract_build_tx.call_args.args[1] == 'deposit'
+    pool.rpc.contract_build_tx.assert_called_once()
+    pool.rpc.contract_call.assert_not_called()
+    tornado.note_deposited.assert_not_called()
+    tornado.connection.sign_transaction.assert_not_called()
+    tornado.connection.send_transaction.assert_not_called()
+    assert tornado.approve_tx(ACCOUNT)['chainId'] == 1
+    assert pool.rpc.contract_build_tx.call_args.args[1] == 'approve'
+
+
+@pytest.mark.parametrize('method', ['approve', 'deposit'])
+@pytest.mark.parametrize('reason', [None, 'This note has already been spent'])
+def test_build_failure_preserves_rpc_error_and_never_signs(tornado: pool.Tornado, note: Note,
+        monkeypatch: pytest.MonkeyPatch, method: str, reason: str | None) -> None:
+    error = pool.rpc.Error(pool.rpc.ErrorCode.EXECUTION_REVERTED, (), 'Raw RPC details', reason)
+    monkeypatch.setattr(pool.rpc, 'contract_build_tx', Mock(return_value=error))
+    logged = Mock()
+    monkeypatch.setattr(pool.log, 'error', logged)
+    unsigned = {'approve': (ACCOUNT,), 'deposit': (note.commitment, ACCOUNT),
+                'withdraw': (note, ACCOUNT, RECIPIENT, MerkleProof(HASH), tornado.zksnark.prove.return_value)}
+    assert getattr(tornado, method + '_tx')(*unsigned[method]) is error
+    key = Key('11' * 32)
+    signed = {'approve': (key,), 'deposit': (note.commitment, key), 'withdraw': (note, RECIPIENT, key)}
+    assert getattr(tornado, method)(*signed[method]) is None
+    tornado.connection.sign_transaction.assert_not_called()
+    tornado.connection.send_transaction.assert_not_called()
+    assert all(call.args[1].endswith('failed to build transaction, RPC error: EXECUTION_REVERTED')
+               for call in logged.call_args_list)
+    assert logged.call_count == 2 and error.msg == 'Raw RPC details'
+
+
+@pytest.mark.parametrize('method', ['approve', 'deposit'])
+def test_missing_unsigned_transaction_never_signs(tornado: pool.Tornado, note: Note,
+        monkeypatch: pytest.MonkeyPatch, method: str) -> None:
+    monkeypatch.setattr(tornado, method + '_tx', Mock(return_value=None))
+    key = Key('11' * 32)
+    args = {'approve': (key,), 'deposit': (note.commitment, key), 'withdraw': (note, RECIPIENT, key)}
+    assert getattr(tornado, method)(*args[method]) is None
+    tornado.connection.sign_transaction.assert_not_called()
+    tornado.connection.send_transaction.assert_not_called()
+
+
+@pytest.mark.parametrize('method', ['approve', 'deposit'])
+@pytest.mark.parametrize('reason', [None, 'Insufficient token allowance'])
+def test_send_failure_hides_revert_reason_in_cli_logs(tornado: pool.Tornado, note: Note,
+        monkeypatch: pytest.MonkeyPatch, method: str, reason: str | None) -> None:
+    error = pool.rpc.Error(pool.rpc.ErrorCode.EXECUTION_REVERTED, (), 'Raw RPC details', reason)
+    tornado.connection.send_transaction.return_value = error
+    logged = Mock()
+    monkeypatch.setattr(pool.log, 'error', logged)
+    key = Key('11' * 32)
+    args = {'approve': (key,), 'deposit': (note.commitment, key), 'withdraw': (note, RECIPIENT, key)}
+    assert getattr(tornado, method)(*args[method]) is None
+    tornado.connection.sign_transaction.assert_called_once()
+    tornado.connection.send_transaction.assert_called_once()
+    message = logged.call_args.args[1]
+    assert message.endswith('failed to send transaction, RPC error: EXECUTION_REVERTED')
+    assert 'Raw RPC details' not in message
+    assert error.msg == 'Raw RPC details'
 
 
 def test_tree_initialization_forwards_real_layer_progress(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:

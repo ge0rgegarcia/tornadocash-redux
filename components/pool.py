@@ -9,7 +9,7 @@ from web3 import Web3
 from web3.contract import Contract
 from web3.types import Nonce, Wei, TxParams
 
-from . import database, log, merkle_tree, rpc, util
+from . import database, log, merkle_tree, rpc, util, wallet
 from .blockchain import EventPoller, EventDeposit, EventWithdraw
 from .mytype import ChainID, CircuitInput, Key, MerkleProof, Metadata, Note, Second, Symbol, TornadoUnit, SymbolType, chain_to_string
 from .util import get_symbol_type, unit_to_wei, wait
@@ -216,9 +216,10 @@ class Tornado(EventPoller.Handler):
     # Create unsigned approve transaction of 'self.unit' amounts of tokens for deposit
     # @param    address     The address to make the approval, must use the corresponding private key to sign the transaction
     # @param    nonce       The nonce of the address, if None, will be queried from the blockchain
-    # @return   TxParams of the unsigned transaction on success, None if failed
-    def approve_tx(self, address: ChecksumAddress, nonce: Nonce | rpc.Error | None = None) -> TxParams | None:
+    # @return   TxParams of the unsigned transaction on success, rpc.Error or None if failed
+    def approve_tx(self, address: ChecksumAddress, nonce: Nonce | rpc.Error | None = None) -> TxParams | rpc.Error | None:
         if nonce is None:
+            self._progress('Fetching approval transaction nonce')
             nonce = self.connection.nonce(address)
             if rpc.is_error(nonce):
                 log.error(self.tag, f'approve_tx(), failed to get nonce, RPC error: {nonce.code.value}')
@@ -228,13 +229,13 @@ class Tornado(EventPoller.Handler):
             'chainId': self.chain.value,
             'nonce'  : Nonce(nonce),
         }
+        self._progress('Building approval transaction')
         built_tx: TxParams | rpc.Error = rpc.contract_build_tx(
             self.token_contract, 'approve', tx,
             self.proxy_address, unit_to_wei(self.unit, self.meta.decimals[self.symbol])
         )
         if rpc.is_error(built_tx):
-            log.error(self.tag, f'approve_tx(), failed to build transaction, RPC error: {built_tx.code.value}')
-            return None
+            log.error(self.tag, f'approve_tx(), failed to build transaction, RPC error: {built_tx}')
         return built_tx
 
     # Approve 'self.unit' amounts of tokens for deposit
@@ -248,16 +249,9 @@ class Tornado(EventPoller.Handler):
                 log.error(self.tag, f'approve(), failed to get nonce, RPC error: {nonce.code.value}')
                 return None
         # Build
-        built_tx: TxParams | None = self.approve_tx(key.eth_address(), nonce)
-        # Sign
-        signed_tx: SignedTransaction | rpc.Error = self.connection.sign_transaction(built_tx, key)
-        if rpc.is_error(signed_tx):
-            log.error(self.tag, f'approve(), failed to sign transaction, RPC error: {signed_tx.code.value}')
-            return None
-        # Send
-        tx_hash: HexBytes | rpc.Error = self.connection.send_transaction(signed_tx)
-        if rpc.is_error(tx_hash):
-            log.error(self.tag, f'approve(), failed to send transaction, RPC error: {tx_hash.code.value}')
+        built_tx: TxParams | rpc.Error | None = self.approve_tx(key.eth_address(), nonce)
+        tx_hash = wallet.send(self.connection, built_tx, key, self.tag, 'approve()')
+        if tx_hash is None:
             return None
         # Wait for the allowance to be updated
         max_waits: int = 30
@@ -281,9 +275,10 @@ class Tornado(EventPoller.Handler):
     # @param    commitment      The commitment of the note to deposit
     # @param    from_address    The address to make the deposit, must use the corresponding private key to sign the transaction
     # @param    nonce           The nonce of the from_address, if None, will be queried from the blockchain
-    # @return   TxParams of the unsigned transaction on success, None if failed
-    def deposit_tx(self, commitment: HexBytes, from_address: ChecksumAddress, nonce: Nonce | rpc.Error | None = None) -> TxParams | None:
+    # @return   TxParams of the unsigned transaction on success, rpc.Error or None if failed
+    def deposit_tx(self, commitment: HexBytes, from_address: ChecksumAddress, nonce: Nonce | rpc.Error | None = None) -> TxParams | rpc.Error | None:
         if nonce is None:
+            self._progress('Fetching deposit transaction nonce')
             nonce = self.connection.nonce(from_address)
             if rpc.is_error(nonce):
                 log.error(self.tag, f'deposit_tx(from={from_address}), failed to get nonce, RPC error: {nonce.code.value}')
@@ -295,10 +290,10 @@ class Tornado(EventPoller.Handler):
         }
         if SymbolType.NATIVE == get_symbol_type(self.symbol):
             tx['value'] = unit_to_wei(self.unit, self.meta.decimals[self.symbol])
+        self._progress('Building deposit transaction')
         built_tx: TxParams | rpc.Error = rpc.contract_build_tx(self.proxy_contract, 'deposit', tx, self.deployment_address, commitment, b'')
         if rpc.is_error(built_tx):
-            log.error(self.tag, f'deposit_tx(from={from_address}), failed to build transaction, RPC error: {built_tx.code.value}')
-            return None
+            log.error(self.tag, f'deposit_tx(from={from_address}), failed to build transaction, RPC error: {built_tx}')
         return built_tx
 
     # Deposit
@@ -327,18 +322,10 @@ class Tornado(EventPoller.Handler):
             # Increase nonce manually
             nonce += 1
         # Build
-        built_tx: TxParams | None = self.deposit_tx(commitment, key.eth_address(), nonce)
-        if built_tx is None:
-            return None
-        # Sign
-        signed_tx: SignedTransaction | rpc.Error = self.connection.sign_transaction(built_tx, key)
-        if rpc.is_error(signed_tx):
-            log.error(self.tag, f'deposit(from={key.eth_address()}), failed to sign transaction, RPC error: {signed_tx.code.value}')
-            return None
-        # Send
-        tx_hash: HexBytes | rpc.Error = self.connection.send_transaction(signed_tx)
-        if rpc.is_error(tx_hash):
-            log.error(self.tag, f'deposit(from={key.eth_address()}), failed to send transaction, RPC error: {tx_hash.code.value}')
+        built_tx: TxParams | rpc.Error | None = self.deposit_tx(commitment, key.eth_address(), nonce)
+        tx_hash = wallet.send(self.connection, built_tx, key, self.tag,
+                              f'deposit(from={key.eth_address()})')
+        if tx_hash is None:
             return None
         log.info(self.tag, f'Deposit {self.unit.value} {self.symbol.value.upper()} succeed, tx hash: {tx_hash.hex()}', log.Color.CYAN, log.Style.BOLD)
         return tx_hash
