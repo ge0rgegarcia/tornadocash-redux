@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
-
 from zkmath import ec, field, polynomial
 
 from .constants import FQ_MODULUS, FR_MODULUS

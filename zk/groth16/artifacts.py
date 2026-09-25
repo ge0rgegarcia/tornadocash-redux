@@ -8,14 +8,14 @@ read-only memory map, so opening the 14 MiB key does not duplicate it in memory.
 
 from __future__ import annotations
 
-import hashlib
-import mmap
-import os
-import struct
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+import hashlib
+import mmap
+import os
+import struct
 
 from .constants import (
     FIELD_ELEMENT_BYTES,

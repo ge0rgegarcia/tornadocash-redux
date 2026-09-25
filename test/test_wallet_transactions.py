@@ -3,10 +3,14 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+
 from hexbytes import HexBytes
 import pytest
-from components import merkle_tree, pool
+
+from components import merkle_tree, pool, relayer
 from components.mytype import ChainID, CircuitInput, Key, MerkleProof, Note, Second, Symbol, TornadoUnit
+
+
 ACCOUNT = '0x' + '11' * 20
 RECIPIENT = '0x' + '22' * 20
 HASH = HexBytes('0x' + '44' * 32)
@@ -85,7 +89,7 @@ def test_erc20_builds_without_preflight_queries_or_automatic_approval(tornado: p
     assert pool.rpc.contract_build_tx.call_args.args[1] == 'approve'
 
 
-@pytest.mark.parametrize('method', ['approve', 'deposit'])
+@pytest.mark.parametrize('method', ['approve', 'deposit', 'withdraw'])
 @pytest.mark.parametrize('reason', [None, 'This note has already been spent'])
 def test_build_failure_preserves_rpc_error_and_never_signs(tornado: pool.Tornado, note: Note,
         monkeypatch: pytest.MonkeyPatch, method: str, reason: str | None) -> None:
@@ -106,7 +110,7 @@ def test_build_failure_preserves_rpc_error_and_never_signs(tornado: pool.Tornado
     assert logged.call_count == 2 and error.msg == 'Raw RPC details'
 
 
-@pytest.mark.parametrize('method', ['approve', 'deposit'])
+@pytest.mark.parametrize('method', ['approve', 'deposit', 'withdraw'])
 def test_missing_unsigned_transaction_never_signs(tornado: pool.Tornado, note: Note,
         monkeypatch: pytest.MonkeyPatch, method: str) -> None:
     monkeypatch.setattr(tornado, method + '_tx', Mock(return_value=None))
@@ -117,7 +121,7 @@ def test_missing_unsigned_transaction_never_signs(tornado: pool.Tornado, note: N
     tornado.connection.send_transaction.assert_not_called()
 
 
-@pytest.mark.parametrize('method', ['approve', 'deposit'])
+@pytest.mark.parametrize('method', ['approve', 'deposit', 'withdraw'])
 @pytest.mark.parametrize('reason', [None, 'Insufficient token allowance'])
 def test_send_failure_hides_revert_reason_in_cli_logs(tornado: pool.Tornado, note: Note,
         monkeypatch: pytest.MonkeyPatch, method: str, reason: str | None) -> None:
@@ -134,6 +138,48 @@ def test_send_failure_hides_revert_reason_in_cli_logs(tornado: pool.Tornado, not
     assert message.endswith('failed to send transaction, RPC error: EXECUTION_REVERTED')
     assert 'Raw RPC details' not in message
     assert error.msg == 'Raw RPC details'
+
+
+@pytest.mark.parametrize(('deposited', 'withdrawn'), [(False, False), (True, True), (None, False), (True, None)])
+def test_prepare_uses_local_tree_without_chain_queries(tornado: pool.Tornado, note: Note, deposited: bool | None, withdrawn: bool | None) -> None:
+    tornado.note_deposited.return_value = deposited
+    tornado.note_withdrawn.return_value = withdrawn
+    pool.rpc.contract_call.return_value = pool.rpc.Error(pool.rpc.ErrorCode.UNKNOWN, ())
+    assert tornado.prepare_withdraw(note, RECIPIENT) is not None
+    tornado.note_deposited.assert_not_called()
+    tornado.note_withdrawn.assert_not_called()
+    pool.rpc.contract_call.assert_not_called()
+    tornado.zksnark.prove.assert_called_once()
+    tornado.zksnark.verify.assert_called_once()
+
+
+def test_explicit_full_init_builds_tree_atomically_and_future_sync_appends(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    tree, tornado.tree = tornado.tree, None
+    tornado.sync_only = True
+    tornado.db.get_commitments.return_value = [note.commitment]
+
+    def create(*args: Any) -> SimpleNamespace:
+        assert tornado.mutex.locked()
+        assert args[2] == [note.commitment]
+        return tree
+
+    monkeypatch.setattr(pool.merkle_tree, 'create', create)
+    assert tornado.init(sync_only=False)
+    assert tornado.tree is tree and tornado.sync_only is False
+    assert tornado.init(sync_only=False) and tornado.init(sync_only=True)
+    tornado.db.get_commitments.assert_called_once()
+    merkle_proof, proof = tornado.prepare_withdraw(note, RECIPIENT)
+    circuit = tornado.zksnark.prove.call_args.args[0]
+    assert circuit.recipient == RECIPIENT and circuit.fee == 0 and circuit.refund == 0
+    assert circuit.relayer == '0x' + '00' * 20
+    tornado.zksnark.verify.assert_called_once_with(proof)
+    pool.rpc.contract_call.assert_not_called()
+    commitment = HexBytes('0x55')
+    tornado.on_sync(100, 101, [SimpleNamespace(commitment=commitment)], [])
+    tree.add.assert_called_once_with(commitment)
+    tx = tornado.withdraw_tx(note, ACCOUNT, RECIPIENT, merkle_proof, proof)
+    assert tx['from'] == ACCOUNT
+    tornado.connection.sign_transaction.assert_not_called()
 
 
 def test_tree_initialization_forwards_real_layer_progress(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -228,6 +274,115 @@ def test_initialization_builds_tree_only_when_explicitly_requested(tornado: pool
     tornado.poller.add_handler.assert_called_once_with(tornado)
 
 
+def test_sync_only_mode_never_prepares_or_submits_withdrawals(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    tornado.sync_only, tornado.tree = True, None
+    get = Mock()
+    monkeypatch.setattr(relayer.requests, 'get', get)
+    assert tornado.prepare_withdraw(note, RECIPIENT) is None
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example') is None
+    tornado.db.get_commitments.assert_not_called()
+    tornado.zksnark.prove.assert_not_called()
+    get.assert_not_called()
+
+
+@pytest.mark.parametrize('missing', ['index', 'proof'])
+def test_prepare_rejects_missing_local_deposit(tornado: pool.Tornado, note: Note, missing: str) -> None:
+    if missing == 'index':
+        tornado.tree.get_index.return_value = None
+    else:
+        tornado.tree.get_merkle_proof.return_value = None
+    assert tornado.prepare_withdraw(note, RECIPIENT) is None
+    tornado.zksnark.prove.assert_not_called()
+
+
+def test_snapshot_excludes_sync_but_proving_allows_sync_to_continue(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    tree: merkle_tree.Memory = merkle_tree.Memory(3, [note.commitment])
+    tornado.tree = tree
+    taking_snapshot, release_snapshot, sync_started, sync_done = Event(), Event(), Event(), Event()
+    snapshots: list[tuple[MerkleProof, tuple]] = []
+    original_snapshot = tree.get_merkle_proof
+    proof: dict[str, Any] = tornado.zksnark.prove.return_value
+
+    def snapshot(index: int) -> MerkleProof:
+        assert tornado.mutex.locked()
+        taking_snapshot.set()
+        assert release_snapshot.wait(2)
+        merkle_proof: MerkleProof = original_snapshot(index)
+        snapshots.append((merkle_proof, (merkle_proof.root, tuple(merkle_proof.path_nodes), tuple(merkle_proof.path_indices))))
+        return merkle_proof
+
+    def sync() -> None:
+        sync_started.set()
+        tornado.on_sync(100, 101, [SimpleNamespace(commitment=HexBytes((1).to_bytes(32, 'big')))], [])
+        sync_done.set()
+
+    def prove(circuit: CircuitInput) -> dict[str, Any]:
+        assert sync_done.wait(2)
+        merkle_proof, before = snapshots[0]
+        assert circuit.merkle_proof is merkle_proof
+        assert (merkle_proof.root, tuple(merkle_proof.path_nodes), tuple(merkle_proof.path_indices)) == before
+        assert tree.root() != merkle_proof.root
+        return proof
+
+    monkeypatch.setattr(tree, 'get_merkle_proof', snapshot)
+    tornado.zksnark.prove.side_effect = prove
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        preparing = workers.submit(tornado.prepare_withdraw, note, RECIPIENT)
+        assert taking_snapshot.wait(1)
+        synchronizing = workers.submit(sync)
+        try:
+            assert sync_started.wait(1)
+            assert not sync_done.wait(0.03)
+            tornado.db.add_synchronized.assert_not_called()
+        finally:
+            release_snapshot.set()
+        assert preparing.result(timeout=3) == (snapshots[0][0], proof)
+        synchronizing.result(timeout=1)
+    assert tree.size() == 2
+    tornado.note_withdrawn.assert_not_called()
+    pool.rpc.contract_call.assert_not_called()
+
+
+def test_prepare_rejects_invalid_proof(tornado: pool.Tornado, note: Note) -> None:
+    tornado.zksnark.verify.return_value = False
+    assert tornado.prepare_withdraw(note, RECIPIENT) is None
+    pool.rpc.contract_call.assert_not_called()
+
+
+@pytest.mark.parametrize('proof_available', [True, False])
+def test_proof_progress_precedes_work_and_stops_on_failure(tornado: pool.Tornado, note: Note, proof_available: bool) -> None:
+    messages: list[str] = []
+    tornado.handlers = [SimpleNamespace(on_progress=messages.append)]
+    proof: dict[str, Any] = tornado.zksnark.prove.return_value
+
+    def prove(circuit: CircuitInput) -> dict[str, Any] | None:
+        assert messages[-1] == 'Generating zero-knowledge proof'
+        assert not tornado.mutex.locked()
+        return proof if proof_available else None
+
+    def verify(value: dict[str, Any]) -> bool:
+        assert messages[-1] == 'Verifying zero-knowledge proof'
+        return value is proof
+
+    tornado.zksnark.prove.side_effect = prove
+    tornado.zksnark.verify.side_effect = verify
+    prepared = tornado.prepare_withdraw(note, RECIPIENT)
+    assert (prepared is not None) == proof_available
+    expected: list[str] = ['Reading Merkle path', 'Generating zero-knowledge proof']
+    if proof_available:
+        expected += ['Verifying zero-knowledge proof']
+    else:
+        tornado.zksnark.verify.assert_not_called()
+    assert messages == expected
+
+
+def test_withdraw_rejects_invalid_key_or_relayer_type(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    get = Mock()
+    monkeypatch.setattr(relayer.requests, 'get', get)
+    assert tornado.withdraw(note, RECIPIENT, None) is None
+    get.assert_not_called()
+
+
 def relayer_requests(tornado: pool.Tornado, monkeypatch: pytest.MonkeyPatch, reward_account: str = RECIPIENT) -> tuple[Mock, Mock]:
     status: dict[str, Any] = {'netId': 1, 'rewardAccount': reward_account,
               'instances': {'eth': {'instanceAddress': {'1': ACCOUNT}}}}
@@ -241,3 +396,116 @@ def relayer_requests(tornado: pool.Tornado, monkeypatch: pytest.MonkeyPatch, rew
     monkeypatch.setattr(relayer, 'wait', lambda seconds: None)
     return get, post
 
+
+def test_relayer_reuses_preparation_after_explicit_full_init(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    get, post = relayer_requests(tornado, monkeypatch)
+    tornado.sync_only = True
+    assert tornado.init(sync_only=False)
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example', can_submit=lambda: True) == HASH
+    assert tornado.sync_only is False
+    tornado.zksnark.prove.assert_called_once()
+    assert all('timeout' not in call.kwargs for call in get.call_args_list + post.call_args_list)
+    tornado.connection.send_transaction.assert_not_called()
+
+
+@pytest.mark.parametrize('url', ['http://user:password@relayer.example', 'httpx://relayer.example'])
+def test_relayer_url_is_passed_to_requests(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+    get, post = relayer_requests(tornado, monkeypatch)
+    assert tornado.withdraw(note, RECIPIENT, url) == HASH
+    assert get.call_args_list[0].args == (url + '/status',)
+    assert get.call_args_list[1].args == (url + '/v1/jobs/job',)
+    assert post.call_args.kwargs['url'] == url + '/v1/tornadoWithdraw'
+
+
+def test_relayer_reward_account_is_used_as_returned(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    reward_account: str = '0x' + 'ab' * 20
+    get, post = relayer_requests(tornado, monkeypatch, reward_account)
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example') == HASH
+    assert tornado.zksnark.prove.call_args.args[0].relayer == reward_account
+    assert post.call_args.kwargs['json']['args'][3] == reward_account
+
+
+@pytest.mark.parametrize(('failure', 'show_details'), [
+    ('status_http', False), ('instance', True), ('status_format', True),
+    ('submit_http', False), ('job_http', False), ('tx_hash', False),
+])
+def test_relayer_errors_show_only_relevant_diagnostics(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch,
+                                                         failure: str, show_details: bool) -> None:
+    get, post = relayer_requests(tornado, monkeypatch)
+    responses: list = list(get.side_effect)
+    response: Any = post.return_value if failure == 'submit_http' else responses[1 if failure in ('job_http', 'tx_hash') else 0]
+    if failure.endswith('_http'):
+        response.status_code, response.text = 503, 'relayer diagnostic details'
+        details: str = response.text
+    else:
+        result: dict = response.json()
+        del result[{'instance': 'instances', 'status_format': 'rewardAccount', 'tx_hash': 'txHash'}[failure]]
+        response.json = lambda: result
+        details = str(result)
+    get.side_effect = responses
+    error: Mock = Mock()
+    monkeypatch.setattr(pool.log, 'error', error)
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example') is None
+    assert error.call_count > 0
+    assert any(details in call.args[1] for call in error.call_args_list) == show_details
+
+
+def test_direct_withdraw_still_signs_and_sends(tornado: pool.Tornado, note: Note) -> None:
+    key: Key = Key('11' * 32)
+    tornado.connection.send_transaction.return_value = HASH
+    assert tornado.withdraw(note, RECIPIENT, key) == HASH
+    tornado.connection.nonce.assert_called_once_with(key.eth_address())
+    tornado.connection.sign_transaction.assert_called_once()
+    tornado.connection.send_transaction.assert_called_once_with(tornado.connection.sign_transaction.return_value)
+    tornado.zksnark.prove.assert_called_once()
+    tornado.zksnark.verify.assert_called_once()
+    tornado.note_deposited.assert_not_called()
+    tornado.note_withdrawn.assert_not_called()
+    pool.rpc.contract_call.assert_not_called()
+
+
+def test_relayer_reports_submission_and_job_stages(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    get, post = relayer_requests(tornado, monkeypatch)
+    messages: list[str] = []
+    tornado.handlers = [SimpleNamespace(on_progress=messages.append)]
+    response: Any = post.return_value
+
+    def submit(*args: Any, **kwargs: Any) -> Any:
+        assert messages[-1] == 'Submitting withdrawal to relayer'
+        return response
+
+    post.side_effect = submit
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example') == HASH
+    assert messages[:2] == ['Fetching relayer status', 'Calculating relayer fee']
+    assert messages[-4:] == ['Submitting withdrawal to relayer', 'Waiting for relayer job',
+                             'Checking relayer job: attempt 1/10', 'Relayer job: confirmed']
+    assert all(RECIPIENT not in message and 'relayer.example' not in message for message in messages)
+
+
+def test_relayer_checks_cancellation_after_reporting_submission(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    get, post = relayer_requests(tornado, monkeypatch)
+    ready: list[bool] = [True]
+
+    def progress(message: str) -> None:
+        if message == 'Submitting withdrawal to relayer':
+            ready[0] = False
+
+    tornado.handlers = [SimpleNamespace(on_progress=progress)]
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example', can_submit=lambda: ready[0]) is None
+    post.assert_not_called()
+
+
+def test_relayer_cannot_submit_after_proving_changes_sync_state(tornado: pool.Tornado, note: Note, monkeypatch: pytest.MonkeyPatch) -> None:
+    get, post = relayer_requests(tornado, monkeypatch)
+    ready = [True]
+    proof = tornado.zksnark.prove.return_value
+
+    def prove(circuit: CircuitInput) -> dict[str, Any]:
+        ready[0] = False
+        return proof
+
+    tornado.zksnark.prove.side_effect = prove
+    assert tornado.withdraw(note, RECIPIENT, 'https://relayer.example', can_submit=lambda: ready[0]) is None
+    tornado.zksnark.verify.assert_called_once()
+    get.assert_called_once_with('https://relayer.example/status')
+    post.assert_not_called()

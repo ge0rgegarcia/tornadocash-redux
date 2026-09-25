@@ -8,22 +8,22 @@ JavaScript parser, evaluator, Node subprocess, or runtime dependency on
 
 from __future__ import annotations
 
-import base64
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
+import base64
+import json
 import sys
 import threading
-from typing import Any
 import zlib
 
 from ._witness_program import (
+    F,
     FUNCTIONS,
     METADATA_B85,
     N_INPUTS,
     N_SIGNALS,
     N_VARS,
-    F,
     TEMPLATES,
 )
 
@@ -293,8 +293,8 @@ def _iterate_input(value: Any, selectors: list[int]):
 def _validate_zkmath(inputs: Mapping[str, Any], commitment: int) -> None:
     """Cross-check circuit-domain results with zkmath's native APIs."""
 
-    import zkmath
     from zkmath import ec, hash
+    import zkmath
 
     nullifier = int(inputs["nullifier"])
     secret = int(inputs["secret"])

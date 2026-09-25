@@ -2,33 +2,32 @@
 
 from __future__ import annotations
 
-import secrets
 from collections.abc import Sequence
-from typing import Any
-
-import config
 from py_ecc.optimized_bn128 import (
-    FQ,
-    FQ2,
-    Z1,
-    Z2,
     add,
     curve_order,
+    FQ,
+    FQ2,
     multiply,
     neg,
+    Z1,
+    Z2,
 )
+from typing import Any
+import secrets
 
 from .artifacts import (
     G1Affine,
     G2Affine,
     LegacyProvingKey,
-    SparseTerm,
     open_tornado_proving_key,
+    SparseTerm,
 )
 from .constants import FR_MODULUS
 from .msm import query_msms
 from .ntt import fft, ifft
 from .serialization import G1Point, G2Point, proof_to_dict
+import config
 
 
 def _g1(point: G1Affine) -> G1Point:

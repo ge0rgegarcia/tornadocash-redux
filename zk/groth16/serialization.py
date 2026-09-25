@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from py_ecc.optimized_bn128 import curve_order, FQ, FQ2, field_modulus, is_inf, normalize
 from typing import Any, TypeAlias
-
-from py_ecc.optimized_bn128 import FQ, FQ2, curve_order, field_modulus, is_inf, normalize
 
 
 PUBLIC_INPUT_COUNT = 6

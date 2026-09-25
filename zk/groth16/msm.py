@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from py_ecc.optimized_bn128 import FQ, FQ2, Z1, Z2
+from typing import Any
 import atexit
 import threading
-from collections.abc import Sequence
-from typing import Any
-
-from py_ecc.optimized_bn128 import FQ, FQ2, Z1, Z2
 
 from . import native
 from .artifacts import LegacyProvingKey

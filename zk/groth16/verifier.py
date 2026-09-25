@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import json
-import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
-
 from py_ecc.optimized_bn128 import (
-    FQ12,
     add,
     b,
     b2,
     curve_order,
+    FQ12,
     final_exponentiate,
     is_inf,
     is_on_curve,
@@ -23,18 +19,21 @@ from py_ecc.optimized_bn128 import (
     neg,
     pairing,
 )
+from typing import Any
+import hashlib
+import json
 
+from .constants import TORNADO_VERIFICATION_KEY_SHA256
 from .serialization import (
     G1Point,
     G2Point,
-    PUBLIC_INPUT_COUNT,
     ParsedProof,
+    PUBLIC_INPUT_COUNT,
     parse_g1,
     parse_g2,
     parse_proof,
     validate_solidity_block,
 )
-from .constants import TORNADO_VERIFICATION_KEY_SHA256
 
 
 DEFAULT_VERIFICATION_KEY_PATH = (

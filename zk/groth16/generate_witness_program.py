@@ -14,15 +14,15 @@ Run without ``--check`` to regenerate ``_witness_program.py`` atomically.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
 import argparse
 import ast
 import base64
 import hashlib
 import json
-from pathlib import Path
 import sys
 import tempfile
-from typing import Any
 import zlib
 
 try:
