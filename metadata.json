@@ -1,7 +1,7 @@
 {
     "ethereum": {
         "proxy_address": "0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b",
-        "multicall_address": "0xeefBa1e63905eF1D7ACbA5a8513c70307C1cE441",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "eth": {
             "deployed_address": {
                 "0.1": "0x12D66f87A04A9E220743712cE6d9bB1B5616B8Fc",
@@ -90,7 +90,7 @@
     },
     "optimism": {
         "proxy_address": "0x0D5550d52428E7e3175bfc9550207e4ad3859b17",
-        "multicall_address": "0x142E2FEaC30d7fc3b61f9EE85FCCad8e560154cc",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "eth": {
             "deployed_address": {
                 "0.1": "0x84443CFd09A48AF6eF360C6976C5392aC5023a1F",
@@ -109,7 +109,7 @@
     },
     "bsc": {
         "proxy_address": "0x0D5550d52428E7e3175bfc9550207e4ad3859b17",
-        "multicall_address": "0x41263cBA59EB80dC200F3E2544eda4ed6A90E76C",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "bnb": {
             "deployed_address": {
                 "0.1": "0x84443CFd09A48AF6eF360C6976C5392aC5023a1F",
@@ -128,7 +128,7 @@
     },
     "polygon": {
         "proxy_address": "0x0D5550d52428E7e3175bfc9550207e4ad3859b17",
-        "multicall_address": "0x11ce4B23bD875D7F5C6a31084f55fDe1e9A87507",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "pol": {
             "deployed_address": {
                 "100"   : "0x1E34A77868E19A6647b1f2F47B51ed72dEDE95DD",
@@ -147,7 +147,7 @@
     },
     "arbitrum": {
         "proxy_address": "0x0D5550d52428E7e3175bfc9550207e4ad3859b17",
-        "multicall_address": "0xB064Fe785d8131653eE12f3581F9A55F6D6E1ca3",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "eth": {
             "deployed_address": {
                 "0.1": "0x84443CFd09A48AF6eF360C6976C5392aC5023a1F",
@@ -166,7 +166,7 @@
     },
     "avalanche": {
         "proxy_address": "0x0D5550d52428E7e3175bfc9550207e4ad3859b17",
-        "multicall_address": "0x98e2060F672FD1656a07bc12D7253b5e41bF3876",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "avax": {
             "deployed_address": {
                 "10" : "0x330bdFADE01eE9bF63C209Ee33102DD334618e0a",
@@ -183,7 +183,7 @@
     },
     "sepolia": {
         "proxy_address": "0x1572AFE6949fdF51Cb3E0856216670ae9Ee160Ee",
-        "multicall_address": "0x53c43764255c17bd724f74c4ef150724ac50a3ed",
+        "multicall_address": "0xcA11bde05977b3631167028862bE2a173976CA11",
         "eth": {
             "deployed_address": {
                 "0.1": "0x8C4A04d872a6C1BE37964A21ba3a138525dFF50b",

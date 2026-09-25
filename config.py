@@ -45,7 +45,6 @@ ZK_WORKERS: int = 8
 # Increase this value manually if relayer rejects your request
 RELAYER_FEE_RATE: str = '1.8'
 
-
 # ================================================== Constants =========================================================
 
 MERKLE_TREE_HEIGHT: int = 20
@@ -75,5 +74,7 @@ TORNADO_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/tornado.jso
 TORNADO_PROXY_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/tornado_proxy.json').replace('\\', '/')
 
 ERC20_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/erc20.json').replace('\\', '/')
+
+MULTICALL_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/multicall3.json').replace('\\', '/')
 
 BACKUP_DIR: str = os.path.join(os.path.dirname(__file__), 'backup').replace('\\', '/')

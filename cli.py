@@ -4,12 +4,14 @@ import os
 import threading
 import traceback
 from datetime import datetime
+from time import monotonic
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.types import TxReceipt
 
 from components import log, rpc, util
+from components import batch_tx
 from components.blockchain import EventDeposit, EventWithdraw
 from components.pool import Tornado
 from components.mytype import ChainID, Key, Metadata, Note, Second, Symbol, TornadoUnit, chain_to_string, string_to_chain
@@ -17,8 +19,6 @@ import config
 
 
 tag: str = 'cli'
-
-
 def get_option() -> tuple[str, argparse.Namespace] | None:
     class MyFormatter(argparse.RawTextHelpFormatter):
         def __init__(self, prog):
@@ -94,7 +94,7 @@ def get_option() -> tuple[str, argparse.Namespace] | None:
         required=False,
         nargs=3,
         metavar=("<notes>", "<recipient>", "<key/relayer_url>"),
-        help="Make withdrawal in batch\n"
+        help="Make withdrawals in batch (wallet: one transaction per chain; relayer: one per note)\n"
              "<notes>          : Multiple tornado note text separated by comma without whitespace\n"
              "<recipient>      : Recipient address\n"
              "<key/relayer_url>: Relayer URL or private key in Hex string, '0x' prefix is optional\n"
@@ -466,6 +466,38 @@ def _deposit(key: Key, tornado: Tornado, invoice: HexBytes | None = None) -> Hex
     return tx_hash
 
 
+def _wait_batch_receipt(connection: rpc.Interface, tx_hash: HexBytes, operation: str,
+                        recipient: ChecksumAddress | None = None, *, timeout: int | None = None) -> TxReceipt | None:
+    deadline = monotonic() + timeout if timeout is not None else None
+    log.info(tag, f'Wait 15 seconds for {operation.lower()} transaction to be mined ...')
+    delay = 15
+    while True:
+        if deadline is not None:
+            delay = min(delay, deadline - monotonic())
+            if delay <= 0:
+                break
+        util.wait(Second(delay))
+        if deadline is not None and monotonic() >= deadline:
+            break
+        receipt: TxReceipt | rpc.Error = connection.transaction_receipt(tx_hash)
+        if rpc.is_error(receipt):
+            log.warn(tag, f'Wait 5 seconds for {operation.lower()} transaction to be mined, RPC error: {receipt.code.value}')
+        elif receipt is not None and receipt['blockNumber'] is not None:
+            if receipt['status'] != 1:
+                log.error(tag, f'{operation} transaction failed, tx_hash: {tx_hash.to_0x_hex()}')
+                return None
+            destination: str = f', recipient: {recipient}' if recipient else ''
+            log.info(tag, f'{operation} transaction mined in block {receipt["blockNumber"]}, '
+                          f'tx_hash: {tx_hash.to_0x_hex()}{destination}', log.Color.CYAN, log.Style.BOLD)
+            return receipt
+        else:
+            log.info(tag, f'Wait 5 seconds for {operation.lower()} transaction to be mined ...')
+        delay = 5
+    log.error(tag, f'Timed out waiting for {operation.lower()} transaction receipt, tx_hash: {tx_hash.to_0x_hex()}. '
+                   'Check the transaction before retrying.')
+    return None
+
+
 def deposit(key: Key, chain: ChainID, symbol: Symbol, unit: TornadoUnit, invoice: HexBytes | None = None) -> None:
     tornado: Tornado = Tornado(chain, symbol, unit)
     if not tornado.init(sync_only=True):
@@ -615,6 +647,35 @@ def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: 
         if not connections[chain].start():
             log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
             return None
+    if isinstance(key_or_relayer, Key):
+        try:
+            for chain, v0 in parsed.items():
+                instances: list[Tornado] = []
+                withdrawals: list[tuple[Tornado, Note]] = []
+                try:
+                    for symbol, v1 in v0.items():
+                        for unit, notes in v1.items():
+                            tornado: Tornado = Tornado(chain, symbol, unit, connections[chain])
+                            instances.append(tornado)
+                            if not tornado.init(sync_only=False):
+                                return
+                            _sync(tornado, False)
+                            withdrawals.extend((tornado, note) for note in notes)
+                    transaction = batch_tx.withdraw_tx(withdrawals, key_or_relayer.eth_address(), recipient)
+                    tx_hash: HexBytes | None = batch_tx.send(withdrawals[0][0], transaction, key_or_relayer)
+                    if tx_hash is None or not _wait_batch_receipt(connections[chain], tx_hash, 'Withdraw', recipient):
+                        return
+                finally:
+                    for tornado in instances:
+                        tornado.un_init()
+        except KeyboardInterrupt:
+            log.warn(tag, 'Interrupted')
+        except ValueError as e:
+            log.error(tag, f'withdraw_batch() failed: {e}')
+        finally:
+            for conn in connections.values():
+                conn.stop()
+        return
     # Withdraw
     for chain, v0 in parsed.items():
         for symbol, v1 in v0.items():
@@ -646,6 +707,9 @@ def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: 
                             util.wait(Second(5))
                             continue
                         if receipt is not None and receipt['blockNumber'] is not None:
+                            if receipt['status'] != 1:
+                                log.error(tag, f'Withdraw transaction failed, tx_hash: {tx_hash.to_0x_hex()}')
+                                break
                             log.info(tag, f'Withdraw transaction mined in block {receipt["blockNumber"]}, '
                                           f'tx_hash: {tx_hash.to_0x_hex()}, recipient: {recipient}', log.Color.CYAN, log.Style.BOLD)
                             break
