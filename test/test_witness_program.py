@@ -1,11 +1,11 @@
+from pathlib import Path
+from unittest.mock import patch
 import base64
 import contextlib
 import importlib.util
 import io
-from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 import zlib
 
 
