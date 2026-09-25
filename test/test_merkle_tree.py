@@ -1,10 +1,105 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from hexbytes import HexBytes
+from zkmath import hash
+from threading import Event
+from unittest.mock import patch
 
 from components import merkle_tree
+from components.mytype import MerkleProof
 
 
 class TestMerkleTree(unittest.TestCase):
+
+    def test_progress_reports_real_initialization_layers_only(self) -> None:
+        progress: list[tuple[int, int, int, int]] = []
+        with patch.object(merkle_tree.time, 'monotonic', return_value=0.0):
+            tree: merkle_tree.Interface = merkle_tree.create(
+                merkle_tree.ImplType.MEMORY, 3, self.leafs[:5],
+                lambda level, height, completed, total: progress.append((level, height, completed, total))
+            )
+        expected_progress: list[tuple[int, int, int, int]] = [
+            (1, 3, 0, 3), (1, 3, 3, 3),
+            (2, 3, 0, 2), (2, 3, 2, 2),
+            (3, 3, 0, 1), (3, 3, 1, 1),
+        ]
+        self.assertEqual(expected_progress, progress)
+        expected: merkle_tree.Memory = merkle_tree.Memory(3, self.leafs[:5])
+        self.assertEqual(expected.root(), tree.root())
+        self.assertTrue(tree.add(self.leafs[5]))
+        self.assertEqual(expected_progress, progress)
+        progress.clear()
+        merkle_tree.Memory(3, [], lambda level, height, completed, total: progress.append((level, height, completed, total)))
+        self.assertEqual([], progress)
+        with self.assertRaises(ValueError):
+            merkle_tree.Memory(1, self.leafs[:3], lambda level, height, completed, total: progress.append((level, height, completed, total)))
+        self.assertEqual([], progress)
+
+    def test_progress_throttles_intermediate_nodes_but_always_finishes(self) -> None:
+        progress: list[tuple[int, int, int, int]] = []
+        times = iter([0.0, 0.249, 0.25, 0.499, 0.5])
+
+        def clock() -> float:
+            return next(times, 0.5)
+
+        leafs: list[HexBytes] = self.leafs + [HexBytes((7).to_bytes(32, 'big'))]
+        with patch.object(merkle_tree.time, 'monotonic', side_effect=clock):
+            tree: merkle_tree.Memory = merkle_tree.Memory(
+                3, leafs, lambda level, height, completed, total: progress.append((level, height, completed, total))
+            )
+        self.assertEqual([
+            (1, 3, 0, 4), (1, 3, 2, 4), (1, 3, 4, 4),
+            (2, 3, 0, 2), (2, 3, 2, 2),
+            (3, 3, 0, 1), (3, 3, 1, 1),
+        ], progress)
+        self.assertEqual(merkle_tree.Memory(3, leafs).root(), tree.root())
+
+    def test_without_progress_does_not_read_the_clock(self) -> None:
+        with patch.object(merkle_tree.time, 'monotonic', side_effect=AssertionError('Progress clock was read')):
+            tree: merkle_tree.Memory = merkle_tree.Memory(3, self.leafs[:5])
+            self.assertTrue(tree.add(self.leafs[5]))
+        self.assertEqual(6, tree.size())
+
+    def test_concurrent_append_keeps_proof_root_and_path_consistent(self) -> None:
+        tree: merkle_tree.Memory = merkle_tree.Memory(3, self.leafs[:2])
+        root_before: HexBytes = tree.root()
+        read_root, writer_checked = Event(), Event()
+        original_root = tree.root
+
+        def paused_root() -> HexBytes:
+            root: HexBytes = original_root()
+            read_root.set()
+            self.assertTrue(writer_checked.wait(2))
+            return root
+
+        def append() -> None:
+            self.assertTrue(read_root.wait(2))
+            # Complete the append before the path read whenever it can interleave.
+            if tree.mutex.acquire(blocking=False):
+                try:
+                    self.assertTrue(tree.add(self.leafs[2]))
+                finally:
+                    tree.mutex.release()
+                    writer_checked.set()
+            else:
+                writer_checked.set()
+                self.assertTrue(tree.add(self.leafs[2]))
+
+        with patch.object(tree, 'root', paused_root), ThreadPoolExecutor(max_workers=2) as workers:
+            reading = workers.submit(tree.get_merkle_proof, 0)
+            writing = workers.submit(append)
+            proof: MerkleProof = reading.result(timeout=3)
+            writing.result(timeout=3)
+        node: HexBytes = self.leafs[0]
+        for sibling, side in zip(proof.path_nodes, proof.path_indices):
+            pair: list[HexBytes] = [sibling, node] if side else [node, sibling]
+            node = HexBytes(hash.mimc_sponge(pair, 1, b'')[0])
+        self.assertEqual(node, proof.root)
+        self.assertEqual(root_before, proof.root)
+        self.assertNotEqual(tree.root(), proof.root)
+        before: tuple = proof.root, tuple(proof.path_nodes), tuple(proof.path_indices)
+        self.assertTrue(tree.add(self.leafs[3]))
+        self.assertEqual(before, (proof.root, tuple(proof.path_nodes), tuple(proof.path_indices)))
 
     def setUp(self):
         self.leafs: list[HexBytes] = [

@@ -11,7 +11,7 @@ from web3.types import TxReceipt
 
 from components import log, rpc, util
 from components.blockchain import EventDeposit, EventWithdraw
-from components.core import Tornado
+from components.pool import Tornado
 from components.mytype import ChainID, Key, Metadata, Note, Second, Symbol, TornadoUnit, chain_to_string, string_to_chain
 import config
 

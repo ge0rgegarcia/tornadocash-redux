@@ -1,9 +1,10 @@
 import requests
 import threading
 from eth_account.datastructures import SignedTransaction
+from requests import Response
+from typing import Callable
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
-from requests import Response
 from web3 import Web3
 from web3.contract import Contract
 from web3.types import Nonce, Wei, TxParams
@@ -32,28 +33,33 @@ class Tornado(EventPoller.Handler):
             """Called when the latest block number is updated."""
             pass
 
+        def on_progress(self, message: str) -> None:
+            """Called before an operation starts its next step."""
+            pass
+
     def __init__(self, chain: ChainID, symbol: Symbol, unit: TornadoUnit, connection: rpc.Interface | None = None):
-        self.tag                : str                           = f'{__class__.__name__}'
-        self.chain              : ChainID                       = chain
-        self.symbol             : Symbol                        = symbol
-        self.unit               : TornadoUnit                   = unit
-        self.connection         : rpc.Interface | None          = connection
-        self.external           : bool                          = connection is not None  # If True, the RPC connection is managed outside
-        self.initialized        : bool                          = False
-        self.sync_only          : bool                          = False  # If True, only sync events without rebuilding the merkle tree, 'withdraw()' will not be available
-        self.db                 : database.Interface            = database.create(database.Backend.SQLITE)
-        self.meta               : Metadata                      = util.load_metadata()[chain]
-        self.proxy_address      : ChecksumAddress               = self.meta.proxy_address
-        self.deployment_address : ChecksumAddress               = self.meta.deployment[self.symbol][self.unit][0]
-        self.proxy_contract     : Contract | rpc.Error | None   = None
-        self.deployment_contract: Contract | rpc.Error | None   = None
-        self.token_contract     : Contract | rpc.Error | None   = None
-        self.poller             : EventPoller                   = EventPoller(chain)
-        self.catchup            : bool                          = False
-        self.tree               : merkle_tree.Interface | None  = None
-        self.zksnark            : zk.circuit.Interface          = zk.circuit.create(zk.circuit.ImplType(config.ZK_BACKEND))
-        self.mutex              : threading.Lock                = threading.Lock()
-        self.handlers           : list[Tornado.Handler]         = []
+        self.tag                : str                          = f'{__class__.__name__}'
+        self.chain              : ChainID                      = chain
+        self.symbol             : Symbol                       = symbol
+        self.unit               : TornadoUnit                  = unit
+        self.connection         : rpc.Interface | None         = connection
+        self.external           : bool                         = connection is not None  # If True, the RPC connection is managed outside
+        self.initialized        : bool                         = False
+        self.sync_only          : bool                         = False  # If True, only sync events; withdrawal is unavailable
+        self.db                 : database.Interface           = database.create(database.Backend.SQLITE)
+        self.meta               : Metadata                     = util.load_metadata()[chain]
+        self.proxy_address      : ChecksumAddress              = self.meta.proxy_address
+        self.deployment_address : ChecksumAddress              = self.meta.deployment[self.symbol][self.unit][0]
+        self.proxy_contract     : Contract | rpc.Error | None  = None
+        self.deployment_contract: Contract | rpc.Error | None  = None
+        self.token_contract     : Contract | rpc.Error | None  = None
+        self.poller             : EventPoller                  = EventPoller(chain)
+        self.catchup            : bool                         = False
+        self.last_update_sec    : Second | None                = None
+        self.tree               : merkle_tree.Interface | None = None
+        self.zksnark            : zk.circuit.Interface         = zk.circuit.create(zk.circuit.ImplType(config.ZK_BACKEND))
+        self.mutex              : threading.Lock               = threading.Lock()
+        self.handlers           : list[Tornado.Handler]        = []
         with open(config.TORNADO_PROXY_ABI_PATH, 'r') as f:
             proxy_abi: str = f.read()
         with open(config.TORNADO_ABI_PATH, 'r') as f:
@@ -85,6 +91,8 @@ class Tornado(EventPoller.Handler):
     '''
     def init(self, sync_only: bool) -> bool:
         if self.initialized:
+            if self.sync_only and not sync_only:
+                return self._init_tree()
             log.debug(self.tag, 'init() already initialized')
             return True
         # Start RPC connection
@@ -105,20 +113,38 @@ class Tornado(EventPoller.Handler):
             self.db.close()
             return False
         # Rebuild merkle tree
-        self.sync_only = sync_only
-        if not sync_only:
-            log.info(self.tag, 'Rebuilding merkle tree from database, please wait...')
-            commitments: list[HexBytes] | None = self.db.get_commitments()
-            if commitments is None:
-                log.error(self.tag, 'init() failed to get commitments from database')
-                self.db.close()
-                return False
-            self.tree = merkle_tree.create(merkle_tree.ImplType.MEMORY, config.MERKLE_TREE_HEIGHT, commitments)
-            log.info(self.tag, 'Merkle tree ready')
+        self.sync_only = True
+        if not sync_only and not self._init_tree():
+            self.db.close()
+            return False
         # Add handlers
         self.poller.add_handler(self)
         self.initialized = True
         log.debug(self.tag, f'init()')
+        return True
+
+    def _init_tree(self) -> bool:
+        with self.mutex:
+            if self.tree is None:
+                log.info(self.tag, 'Rebuilding merkle tree from database, please wait...')
+                self._progress('Reading commitments from database')
+                commitments: list[HexBytes] | None = self.db.get_commitments()
+                if commitments is None:
+                    log.error(self.tag, 'init() failed to get commitments from database')
+                    return False
+                try:
+                    self._progress('Preparing Merkle tree')
+                    self.tree = merkle_tree.create(
+                        merkle_tree.ImplType.MEMORY, config.MERKLE_TREE_HEIGHT, commitments,
+                        lambda level, height, completed, total: self._progress(
+                            f'Rebuilding Merkle tree: level {level}/{height} · {completed:,}/{total:,} nodes')
+                    )
+                except ValueError:
+                    log.error(self.tag, 'init() failed to rebuild the merkle tree')
+                    return False
+                log.info(self.tag, 'Merkle tree ready')
+                self._progress('Merkle tree ready')
+            self.sync_only = False
         return True
 
     def un_init(self) -> None:
@@ -152,6 +178,10 @@ class Tornado(EventPoller.Handler):
     def remove_all_handlers(self) -> None:
         with self.mutex:
             self.handlers.clear()
+
+    def _progress(self, message: str) -> None:
+        for h in self.handlers[:]:
+            h.on_progress(message)
 
     # Check if a note has been deposited
     # @param    commitment      The commitment to query
@@ -615,7 +645,9 @@ class Tornado(EventPoller.Handler):
                 raise RuntimeError(f'on_sync() failed to add synchronized data to database')
             if not self.sync_only:
                 for e in deposits:
-                    self.tree.add(e.commitment)
+                    if not self.tree.add(e.commitment):
+                        raise RuntimeError('on_sync() failed to update merkle tree')
+            self.last_update_sec = util.unix_timestamp()
             for h in self.handlers:
                 h.on_sync(block_from, block_to, deposits, withdrawals)
 
