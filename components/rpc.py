@@ -1,4 +1,7 @@
 from enum import Enum
+from collections.abc import Mapping
+from eth_abi import decode
+from eth_abi.exceptions import DecodingError
 from eth_account.datastructures import SignedTransaction
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
@@ -7,8 +10,9 @@ from web3 import Web3
 from web3.contract import Contract
 from web3.datastructures import AttributeDict
 from web3.eth import Eth
+from web3.exceptions import ContractLogicError
 from web3.middleware import ExtraDataToPOAMiddleware
-from web3.types import LogReceipt, Nonce, TxReceipt, TxParams, Wei
+from web3.types import LogReceipt, Nonce, TxData, TxReceipt, TxParams, Wei
 import threading
 import traceback
 
@@ -27,18 +31,22 @@ class ErrorCode(Enum):
     NONCE_TOO_LOW       = 'NONCE_TOO_LOW'
     TX_HASH_NOT_FOUND   = 'TX_HASH_NOT_FOUND'
     MAX_FEE_TOO_LOW     = 'MAX_FEE_LESS_THAN_BASE'
+    GAS_LIMIT_EXCEEDED  = 'GAS_LIMIT_EXCEEDED'
     INSUFFICIENT_FUNDS  = 'INSUFFICIENT_FUNDS'
     REPLACE_UNDERPRICE  = 'REPLACE_UNDERPRICE'
-    ADDRESS_SANCTIONED  = 'ADDRESS_SANCTIONED'
     EXECUTION_REVERTED  = 'EXECUTION_REVERTED'
 
 
 class Error(object):
 
-    def __init__(self, code: ErrorCode, call_param: tuple[Any, ...], msg: str = '') -> None:
+    def __init__(self, code: ErrorCode, call_param: tuple[Any, ...], msg: str = '', reason: str | None = None) -> None:
         self.code      : ErrorCode       = code
         self.call_param: tuple[Any, ...] = call_param
         self.msg       : str             = msg
+        self.reason    : str | None      = reason
+
+    def __str__(self) -> str:
+        return self.code.value
 
 
 def is_error(value: Any) -> bool:
@@ -48,6 +56,8 @@ def is_error(value: Any) -> bool:
 
 
 def parse_exception_to_error_code(e: Exception) -> ErrorCode:
+    if isinstance(e, ContractLogicError):
+        return ErrorCode.EXECUTION_REVERTED
     text: str = str(e).lower()
     if all(key in text for key in ['too many requests', 'rate limit']):
         return ErrorCode.RPC_CALL_RATE_LIMIT
@@ -69,11 +79,46 @@ def parse_exception_to_error_code(e: Exception) -> ErrorCode:
         return ErrorCode.INSUFFICIENT_FUNDS
     elif all(key in text for key in ['replace', 'underprice']):
         return ErrorCode.REPLACE_UNDERPRICE
-    elif any(key in text for key in ['sanction', 'sanctioned', 'blacklist']):
-        return ErrorCode.ADDRESS_SANCTIONED
     elif all(key in text for key in ['execution', 'reverted']):
         return ErrorCode.EXECUTION_REVERTED
     return ErrorCode.UNKNOWN
+
+
+def decode_revert(data: str | bytes | None) -> str | None:
+    try:
+        raw = HexBytes(data)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not raw:
+        return None
+    try:
+        if raw[:4].hex() == '08c379a0':
+            return decode(['string'], raw[4:])[0] or 'Execution reverted with an empty reason.'
+        if raw[:4].hex() == '4e487b71':
+            code = decode(['uint256'], raw[4:])[0]
+            meaning = {
+                0x00: 'compiler panic', 0x01: 'assertion failed',
+                0x11: 'arithmetic overflow or underflow', 0x12: 'division or modulo by zero',
+                0x21: 'invalid enum conversion', 0x22: 'invalid storage byte array encoding',
+                0x31: 'pop from an empty array', 0x32: 'array index out of bounds',
+                0x41: 'too much memory allocated', 0x51: 'uninitialized internal function',
+            }.get(code, 'unknown panic code')
+            return f'Panic(0x{code:x}): {meaning}'
+        if len(raw) >= 4:
+            return f'Custom error 0x{raw[:4].hex()} (data: {raw.to_0x_hex()})'
+    except (TypeError, ValueError, OverflowError, DecodingError):
+        pass
+    return f'Revert data: {raw.to_0x_hex()}'
+
+
+def _exception_reason(error: Exception) -> str | None:
+    if not isinstance(error, ContractLogicError):
+        return None
+    data = error.data
+    if isinstance(data, Mapping):
+        data = data.get('data', data.get('result'))
+    decoded = decode_revert(data) if isinstance(data, (str, bytes)) else None
+    return decoded or error.message or 'Execution reverted without return data.'
 
 
 def contract_call(contract: Contract, method: str, *args) -> Any | Error:
@@ -83,17 +128,17 @@ def contract_call(contract: Contract, method: str, *args) -> Any | Error:
         return result
     except Exception as e:
         code: ErrorCode = parse_exception_to_error_code(e)
-        return Error(code, (contract.address, method, args), str(e))
+        return Error(code, (contract.address, method, args), str(e), _exception_reason(e))
 
 
-def contract_build_tx(contract: Contract, method: str, tx_params: TxParams, *args) -> TxParams | Error:
+def contract_build_tx(contract: Contract, method: str | None, tx_params: TxParams, *args) -> TxParams | Error:
     try:
-        func = contract.get_function_by_name(method)
+        func = contract.constructor if method is None else contract.get_function_by_name(method)
         tx: TxParams = func(*args).build_transaction(tx_params)
         return tx
     except Exception as e:
         code: ErrorCode = parse_exception_to_error_code(e)
-        return Error(code, (contract.address, method, tx_params, args), str(e))
+        return Error(code, (contract.address, method, tx_params, args), str(e), _exception_reason(e))
 
 
 class Web3EthWrapper(Eth):
@@ -124,7 +169,8 @@ class Interface(object):
     def gas_price(self, callback: Callable[[Wei | Error], None] = None) -> Wei | Error | None:
         raise NotImplementedError
 
-    def get_contract(self, address: ChecksumAddress, abi: str, callback: Callable[[Contract | Error], None] = None) -> Contract | Error | None:
+    def get_contract(self, address: ChecksumAddress | None, abi: str, callback: Callable[[Contract | Error], None] = None,
+                     *, bytecode: str | None = None) -> Contract | Error | None:
         raise NotImplementedError
 
     def latest_block_number(self, callback: Callable[[int | Error], None] = None) -> int | Error | None:
@@ -136,7 +182,14 @@ class Interface(object):
     def transaction_receipt(self, tx_hash: HexBytes, callback: Callable[[tuple[HexBytes, TxReceipt] | Error], None] = None) -> TxReceipt | Error | None:
         raise NotImplementedError
 
-    def nonce(self, address: ChecksumAddress, callback: Callable[[int | Error], None] = None) -> int | Error | None:
+    def transaction(self, tx_hash: HexBytes) -> TxData | Error:
+        raise NotImplementedError
+
+    def transaction_revert_reason(self, tx_hash: HexBytes) -> str | None:
+        raise NotImplementedError
+
+    def nonce(self, address: ChecksumAddress, callback: Callable[[int | Error], None] = None,
+              *, block: str = 'latest') -> int | Error | None:
         raise NotImplementedError
 
     def sign_transaction(self, transaction: TxParams, private_key: Key, callback: Callable[[SignedTransaction | Error], None] = None) -> SignedTransaction | Error | None:
@@ -209,11 +262,12 @@ class Connection(Interface):
             return self.run_sync(_, signature, call_param)
         self.run_async(_, signature, call_param, callback)
 
-    def get_contract(self, address: ChecksumAddress, abi: str, callback: Callable[[Contract | Error], None] = None) -> Contract | Error | None:
+    def get_contract(self, address: ChecksumAddress | None, abi: str, callback: Callable[[Contract | Error], None] = None,
+                     *, bytecode: str | None = None) -> Contract | Error | None:
         call_param: tuple[Any, ...] = (address, abi, callback)
         signature: str = f'any_contract(address={address}, async={True if callback else False})'
         def _() -> Contract:
-            return self.w3.eth.contract(address=address, abi=abi)
+            return self.w3.eth.contract(address=address, abi=abi, bytecode=bytecode)
         if self.turn_off:
             log.error(self.TAG, "Connection not started")
             return Error(ErrorCode.RPC_NOT_STARTED, call_param)
@@ -271,11 +325,36 @@ class Connection(Interface):
                 callback(Error(ErrorCode.UNKNOWN, call_param, msg))
         self.run_async(_, signature, call_param, bridge)
 
-    def nonce(self, address: ChecksumAddress, callback: Callable[[int | Error], None] = None) -> int | Error | None:
+    def transaction(self, tx_hash: HexBytes) -> TxData | Error:
+        if self.turn_off:
+            return Error(ErrorCode.RPC_NOT_STARTED, (tx_hash,))
+        return self.run_sync(lambda: self.w3.eth.get_transaction(tx_hash),
+                             f'transaction(hash={tx_hash.to_0x_hex()})', (tx_hash,))
+
+    def transaction_revert_reason(self, tx_hash: HexBytes) -> str | None:
+        if self.turn_off:
+            return None
+        result = self.run_sync(lambda: self.w3.manager.request_blocking('debug_traceTransaction', [
+            tx_hash.to_0x_hex(), {'tracer': 'callTracer', 'tracerConfig': {'onlyTopCall': True}, 'timeout': '5s'},
+        ]), f'transaction_revert_reason(hash={tx_hash.to_0x_hex()})', (tx_hash,))
+        if not isinstance(result, Mapping):
+            return None
+        reason = decode_revert(result.get('output', result.get('returnValue')))
+        if reason:
+            return reason
+        if isinstance(result.get('revertReason'), str) and result['revertReason']:
+            return result['revertReason']
+        error = result.get('error')
+        if error:
+            return 'Execution reverted without return data.' if 'revert' in str(error).lower() else str(error)
+        return None
+
+    def nonce(self, address: ChecksumAddress, callback: Callable[[int | Error], None] = None,
+              *, block: str = 'latest') -> int | Error | None:
         call_param: tuple[Any, ...] = (address, callback)
         signature: str = f'nonce(address={address}, async={True if callback else False})'
         def _() -> Nonce:
-            return self.w3.eth.get_transaction_count(address)
+            return self.w3.eth.get_transaction_count(address, block)
         if self.turn_off:
             log.error(self.TAG, "Connection not started")
             return Error(ErrorCode.RPC_NOT_STARTED, call_param)
@@ -335,7 +414,7 @@ class Connection(Interface):
                     code : ErrorCode = parse_exception_to_error_code(e)
                     lines: list[str] = [f'{signature} raised {type(e)} exception, {code.value}']
                     log.debug(self.TAG, lines)
-                    result = Error(code, call_param, str(e))
+                    result = Error(code, call_param, str(e), _exception_reason(e))
                 break
             done = True
             done_event.set()
@@ -361,7 +440,7 @@ class Connection(Interface):
                     stack: str       = traceback.format_exc()
                     lines.extend(stack.split('\n'))
                     log.debug(self.TAG, lines)
-                    result = Error(code, call_param, str(e))
+                    result = Error(code, call_param, str(e), _exception_reason(e))
                 break
             callback(result)
         with self.condition:
