@@ -350,7 +350,7 @@ def sync_all_events(keep: bool) -> None:
             connections[k] = rpc.Connection(k, config.RPC_URLS[k])
             try:
                 if not connections[k].start():
-                    log.error(tag, f'Failed to connect to RPC: {config.RPC_URLS[k]}')
+                    log.error(tag, f'Failed to connect to RPC for {chain_to_string(k)}')
                     return
             except KeyboardInterrupt:
                 log.warn(tag, 'Interrupted')
@@ -530,7 +530,7 @@ def deposit_batch(key: Key, batch: str) -> None:
             return None
         connections[chain] = rpc.Connection(chain, config.RPC_URLS[chain])
         if not connections[chain].start():
-            log.error(tag, f'Failed to connect to RPC: {config.RPC_URLS[chain]}')
+            log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
             return None
     # Deposit
     for chain, v0 in parsed.items():
@@ -613,7 +613,7 @@ def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: 
             return None
         connections[chain] = rpc.Connection(chain, config.RPC_URLS[chain])
         if not connections[chain].start():
-            log.error(tag, f'Failed to connect to RPC: {config.RPC_URLS[chain]}')
+            log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
             return None
     # Withdraw
     for chain, v0 in parsed.items():

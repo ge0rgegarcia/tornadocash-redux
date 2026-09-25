@@ -14,7 +14,6 @@ from web3.exceptions import ContractLogicError
 from web3.middleware import ExtraDataToPOAMiddleware
 from web3.types import LogReceipt, Nonce, TxData, TxReceipt, TxParams, Wei
 import threading
-import traceback
 
 from . import log
 from .mytype import ChainID, Key
@@ -211,7 +210,7 @@ class Connection(Interface):
         self.condition  : threading.Condition   = threading.Condition(self.mutex)
         self.tasks      : list[Callable]        = []
         self.worker     : threading.Thread|None = None
-        log.debug(self.TAG, f'Init(url={self.url})')
+        log.debug(self.TAG, 'Initialized RPC connection')
 
     def start(self) -> bool:
         if not self.turn_off:
@@ -227,7 +226,7 @@ class Connection(Interface):
         elif self.url.startswith('ws'):
             self.w3 = Web3(Web3.LegacyWebSocketProvider(self.url))
         else:
-            raise ValueError(f'Unsupported RPC url: {self.url}')
+            raise ValueError('Unsupported RPC URL scheme.')
         if self.chain == ChainID.POLYGON or self.chain == ChainID.BSC:
             self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.w3.eth = Web3EthWrapper(self.w3, self.chain)
@@ -321,7 +320,7 @@ class Connection(Interface):
                 callback((tx_hash, result))
             else:
                 msg: str = f'w3.eth.get_transaction_receipt(tx_hash="{tx_hash.to_0x_hex()}") return unexpected type "{type(result)}" with value "{result}"'
-                log.error(self.TAG, msg)
+                log.error(self.TAG, 'Unexpected transaction receipt response')
                 callback(Error(ErrorCode.UNKNOWN, call_param, msg))
         self.run_async(_, signature, call_param, bridge)
 
@@ -437,8 +436,6 @@ class Connection(Interface):
                 except Exception as e:
                     code : ErrorCode = parse_exception_to_error_code(e)
                     lines: list[str] = [f'{signature} raised {type(e)} exception, {code.value}']
-                    stack: str       = traceback.format_exc()
-                    lines.extend(stack.split('\n'))
                     log.debug(self.TAG, lines)
                     result = Error(code, call_param, str(e), _exception_reason(e))
                 break
