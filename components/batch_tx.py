@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
@@ -6,9 +7,10 @@ from web3.contract import Contract
 from web3.exceptions import ContractLogicError
 from web3.types import Nonce, TxParams, Wei
 
-from . import log, rpc, wallet
+from contracts import compiler
+from . import log, rpc, util, wallet
 from .pool import Tornado
-from .mytype import ChainID, Key, Note
+from .mytype import ChainID, Key, Note, Symbol, SymbolType
 import config
 
 
@@ -78,6 +80,70 @@ def _build(tornado: Tornado, contract: Contract | rpc.Error, method: str | None,
     if method is None:
         transaction.pop('to', None)
     return transaction
+
+
+def token_amounts(deposits: list[tuple[Tornado, HexBytes]]) -> dict[Symbol, Wei]:
+    _first(deposits)
+    amounts: dict[Symbol, Wei] = {}
+    for tornado, _ in deposits:
+        if util.get_symbol_type(tornado.symbol) == SymbolType.ERC20:
+            amount: Wei = util.unit_to_wei(tornado.unit, tornado.meta.decimals[tornado.symbol])
+            amounts[tornado.symbol] = Wei(amounts.get(tornado.symbol, 0) + amount)
+    return amounts
+
+
+def deploy_tx(deposits: list[tuple[Tornado, HexBytes]], account: ChecksumAddress,
+              nonce: Nonce | None = None) -> TxParams | rpc.Error | None:
+    first = _first(deposits)
+    if not token_amounts(deposits):
+        raise ValueError('This batch does not need a batch contract.')
+    mixed = any(util.get_symbol_type(tornado.symbol) == SymbolType.NATIVE for tornado, _ in deposits)
+    abi, bytecode = compiler.batch_depositor_artifact(Path(config.BATCH_CONTRACTS_PATH), mixed, first._progress)
+    contract = first.connection.get_contract(None, abi, bytecode=bytecode)
+    return _build(first, contract, None, (first.proxy_address,), account, nonce)
+
+
+def approve_tx(deposits: list[tuple[Tornado, HexBytes]], account: ChecksumAddress, symbol: Symbol,
+               nonce: Nonce | None = None, *, depositor: ChecksumAddress) -> TxParams | rpc.Error | None:
+    first: Tornado = _first(deposits)
+    amounts: dict[Symbol, Wei] = token_amounts(deposits)
+    if symbol not in amounts:
+        raise ValueError('This token has no deposits in the batch.')
+    tornado: Tornado = next(item for item, _ in deposits if item.symbol == symbol)
+    return _build(first, tornado.token_contract, 'approve', (depositor, amounts[symbol]), account, nonce)
+
+
+def deposit_tx(deposits: list[tuple[Tornado, HexBytes]], account: ChecksumAddress,
+               nonce: Nonce | None = None, *, depositor: ChecksumAddress | None = None) -> TxParams | rpc.Error | None:
+    first: Tornado = _first(deposits)
+    erc20: bool = bool(token_amounts(deposits))
+    if erc20 and depositor is None:
+        raise ValueError('Deploy a batch contract before depositing ERC20 tokens.')
+    calls: list[tuple] = []
+    groups: dict[ChecksumAddress, list[tuple[ChecksumAddress, HexBytes]]] = {}
+    value: int = 0
+    for tornado, commitment in deposits:
+        native: bool = util.get_symbol_type(tornado.symbol) == SymbolType.NATIVE
+        amount: Wei = util.unit_to_wei(tornado.unit, tornado.meta.decimals[tornado.symbol])
+        value += amount if native else 0
+        if erc20:
+            token: ChecksumAddress = Web3.to_checksum_address('0x' + '00' * 20) if native else tornado.meta.token_address[tornado.symbol]
+            groups.setdefault(token, []).append((tornado.deployment_address, commitment))
+        else:
+            data: str = tornado.proxy_contract.encode_abi('deposit', args=[tornado.deployment_address, commitment, b''])
+            calls.append((tornado.proxy_address, False, amount, data))
+    if erc20:
+        abi, _ = compiler.batch_depositor_artifact(Path(config.BATCH_CONTRACTS_PATH), bool(value), first._progress)
+        contract = first.connection.get_contract(depositor, abi)
+        if not rpc.is_error(contract):
+            executed = rpc.contract_call(contract, 'executed')
+            if rpc.is_error(executed):
+                raise RuntimeError('Could not query the batch contract status.')
+            if executed:
+                raise ValueError('This batch contract has already executed. Check the deposit transaction in your wallet.')
+        return _build(first, contract, 'deposit', (list(groups.items()),), account, nonce, Wei(value))
+    return _build(first, _contract(first, first.meta.multicall_address, config.MULTICALL_ABI_PATH),
+                  'aggregate3Value', (calls,), account, nonce, Wei(value))
 
 
 def withdraw_tx(withdrawals: list[tuple[Tornado, Note]], account: ChecksumAddress, recipient: ChecksumAddress,

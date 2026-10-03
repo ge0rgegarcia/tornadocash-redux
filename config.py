@@ -77,4 +77,6 @@ ERC20_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/erc20.json').
 
 MULTICALL_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/multicall3.json').replace('\\', '/')
 
+BATCH_CONTRACTS_PATH: str = os.path.join(os.path.dirname(__file__), 'contracts').replace('\\', '/')
+
 BACKUP_DIR: str = os.path.join(os.path.dirname(__file__), 'backup').replace('\\', '/')

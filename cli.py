@@ -19,6 +19,9 @@ import config
 
 
 tag: str = 'cli'
+BATCH_RECEIPT_TIMEOUT = 120
+
+
 def get_option() -> tuple[str, argparse.Namespace] | None:
     class MyFormatter(argparse.RawTextHelpFormatter):
         def __init__(self, prog):
@@ -65,7 +68,7 @@ def get_option() -> tuple[str, argparse.Namespace] | None:
         required=False,
         nargs=2,
         metavar=("<key>", "<json>"),
-        help="Make deposit in batch\n"
+        help="Make deposits in one transaction per chain\n"
              "<key> : Private key to provide ETHs for deposit and pay the gas fee, hex string, '0x' prefix is optional\n"
              "<json>: JSON string to describe a batch, eg: \n"
              "        '{\"ethereum\": {\"eth\": {\"10\": 100, \"100\": 20}}, \"polygon\": {\"pol\": {\"100000\": 1000}}}'\n"
@@ -498,6 +501,18 @@ def _wait_batch_receipt(connection: rpc.Interface, tx_hash: HexBytes, operation:
     return None
 
 
+def _approve_batch(deposits: list[tuple[Tornado, HexBytes]], key: Key,
+                   symbols: list[Symbol], depositor: ChecksumAddress) -> bool:
+    first  : Tornado         = deposits[0][0]
+    account: ChecksumAddress = key.eth_address()
+    for symbol in symbols:
+        transaction = batch_tx.approve_tx(deposits, account, symbol, depositor=depositor)
+        tx_hash: HexBytes | None = batch_tx.send(first, transaction, key)
+        if tx_hash is None or not _wait_batch_receipt(first.connection, tx_hash, 'Approval', timeout=BATCH_RECEIPT_TIMEOUT):
+            return False
+    return True
+
+
 def deposit(key: Key, chain: ChainID, symbol: Symbol, unit: TornadoUnit, invoice: HexBytes | None = None) -> None:
     tornado: Tornado = Tornado(chain, symbol, unit)
     if not tornado.init(sync_only=True):
@@ -564,43 +579,66 @@ def deposit_batch(key: Key, batch: str) -> None:
         if not connections[chain].start():
             log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
             return None
-    # Deposit
-    for chain, v0 in parsed.items():
-        for symbol, v1 in v0.items():
-            for unit, count in v1.items():
-                tornado: Tornado = Tornado(chain, symbol, unit, connections[chain])
-                if not tornado.init(sync_only=False):
+    # One deposit transaction per chain
+    try:
+        for chain, v0 in parsed.items():
+            instances: list[Tornado] = []
+            deposits: list[tuple[Tornado, HexBytes]] = []
+            backups: list[str] = []
+            try:
+                for symbol, v1 in v0.items():
+                    for unit, count in v1.items():
+                        tornado: Tornado = Tornado(chain, symbol, unit, connections[chain])
+                        instances.append(tornado)
+                        if not tornado.init(sync_only=True):
+                            return
+                        for _ in range(count):
+                            log.info(tag, f'Depositing {util.upper_first_char(chain_to_string(chain))} {unit.value} {symbol.value.upper()}')
+                            note: Note = Note.create()
+                            backup_path: str | None = _save_deposit_note(tornado, note, len(deposits) + 1)
+                            if backup_path is None:
+                                return
+                            backups.append(backup_path)
+                            deposits.append((tornado, note.commitment))
+                if not deposits:
                     continue
-                for _ in range(count):
-                    try:
-                        tx_hash: HexBytes = _deposit(key, tornado)
-                    except KeyboardInterrupt:
-                        log.warn(tag, 'Interrupted')
-                        tornado.un_init()
-                        for conn in connections.values():
-                            conn.stop()
-                        return None
-                    # Wait until the deposit transaction is mined
+                account  : ChecksumAddress        = key.eth_address()
+                symbols  : list[Symbol]           = list(batch_tx.token_amounts(deposits))
+                depositor: ChecksumAddress | None = None
+                if symbols:
+                    transaction = batch_tx.deploy_tx(deposits, account)
+                    tx_hash: HexBytes | None = batch_tx.send(deposits[0][0], transaction, key)
                     if tx_hash is None:
-                        continue
-                    log.info(tag, f'Wait 15 seconds for deposit transaction to be mined ...')
-                    util.wait(Second(15))
-                    while True:
-                        receipt: TxReceipt | rpc.Error = connections[chain].transaction_receipt(tx_hash)
-                        if rpc.is_error(receipt):
-                            log.warn(tag, f'Wait 5 seconds for deposit transaction to be mined, RPC error: {receipt.code.value}')
-                            util.wait(Second(5))
-                            continue
-                        if receipt is not None and receipt['blockNumber'] is not None:
-                            log.info(tag, f'Deposit transaction mined in block {receipt["blockNumber"]}, tx_hash: {tx_hash.to_0x_hex()}', log.Color.CYAN, log.Style.BOLD)
-                            break
-                        log.info(tag, f'Wait 5 seconds for deposit transaction to be mined ...')
-                        util.wait(Second(5))
-                tornado.un_init()
-    # Stop RPC connections
-    for conn in connections.values():
-        conn.stop()
-    return None
+                        return
+                    receipt = _wait_batch_receipt(connections[chain], tx_hash, 'Deployment', timeout=BATCH_RECEIPT_TIMEOUT)
+                    if receipt is None:
+                        return
+                    if not Web3.is_address(receipt.get('contractAddress')):
+                        log.error(tag, f'Missing batch contract address in deployment receipt, tx_hash: {tx_hash.to_0x_hex()}')
+                        return
+                    depositor = Web3.to_checksum_address(receipt['contractAddress'])
+                    log.info(tag, f'Batch deposit contract deployed at {depositor}', log.Color.CYAN, log.Style.BOLD)
+                    if not _approve_batch(deposits, key, symbols, depositor):
+                        return
+                transaction = batch_tx.deposit_tx(deposits, account, depositor=depositor)
+                tx_hash: HexBytes | None = batch_tx.send(deposits[0][0], transaction, key)
+                if tx_hash is None:
+                    return
+                for backup_path in backups:
+                    log.info(tag, f'IMPORTANT: Note backup saved to {backup_path}', log.Color.YELLOW, log.Style.BOLD)
+                timeout = BATCH_RECEIPT_TIMEOUT if depositor is not None else None
+                if not _wait_batch_receipt(connections[chain], tx_hash, 'Deposit', timeout=timeout):
+                    return
+            finally:
+                for tornado in instances:
+                    tornado.un_init()
+    except KeyboardInterrupt:
+        log.warn(tag, 'Interrupted')
+    except (ValueError, RuntimeError) as e:
+        log.error(tag, f'deposit_batch() failed: {e}')
+    finally:
+        for conn in connections.values():
+            conn.stop()
 
 
 def withdraw(note_text: str, recipient: ChecksumAddress, key_or_relayer: Key | str) -> None:
