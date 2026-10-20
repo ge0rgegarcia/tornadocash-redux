@@ -1,0 +1,243 @@
+/* Colors, PT Mono and cut-corner panels follow tornado-classic-ui (MIT). */
+@font-face { font-family: "PT Mono"; src: url("assets/PTMono-Regular.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "PT Mono"; src: url("assets/PTMono-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+:root {
+    color-scheme: dark;
+    --green: #94febf; --background: #000403; --border: #393939; --muted: #858585;
+    --text: #eee; --outline: #0e1f17; --outline-hover: #183c2a; --danger: #ff728d;
+    --warning: #ffc078; --warning-title: #ffd082; --warning-panel: #17130c; --warning-border: #e4b35f;
+    --chevron: url("assets/chevron-down.svg");
+}
+:root[data-theme=light] {
+    color-scheme: light;
+    --green: #126b42; --background: #f8faf8; --border: #83968a; --muted: #506257;
+    --text: #17291e; --outline: #e6f2e9; --outline-hover: #d6eadc; --danger: #9c2444;
+    --warning: #85500e; --warning-title: #78460d; --warning-panel: #fff6e5; --warning-border: #af782d;
+    --surface: #edf2ee; --surface-raised: #f0f7f2; --surface-hover: #dcece1; --surface-border: #a3b8a8;
+    --track: #d3ddd5; --primary-hover: #0e5735; --dialog-shadow: #162d2038;
+    --warning-surface: #f8e8c9; --warning-button: #885111; --warning-button-text: #fff9f0;
+    --warning-button-hover: #6d400d; --warning-muted: #6c5334;
+    --placeholder: #5b6f62; --footer: var(--muted); --backdrop: #17291e66;
+    --warning-strong: #46311a; --warning-accent: var(--warning-border);
+    --wallet-background: #f8fcf9; --wallet-muted: #466150; --wallet-error: #f9e8ed;
+    --wallet-title: var(--text); --wallet-error-border: #ca8799;
+    --chevron: url("assets/chevron-down-light.svg");
+}
+:root[data-theme=light] .logo { filter: brightness(.46) saturate(1.4); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--text); font: 14px/1.5 "PT Mono", monospace; }
+button, input, select, textarea { font: inherit; }
+button, select { cursor: pointer; }
+button, select, input, textarea { color: inherit; border: 1px solid var(--border); border-radius: 4px; background: transparent; }
+button { min-height: 40px; padding: 8px 18px; font-weight: 700; background: var(--surface, #181818); transition: background .15s, border-color .15s; }
+button:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--green); }
+button:disabled, fieldset:disabled { opacity: .45; }
+button:disabled, select:disabled { cursor: not-allowed; }
+fieldset:disabled button { opacity: 1; }
+fieldset { padding: 0; margin: 0; border: 0; min-width: 0; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--green); }
+h1, h2, p { margin: 0; }
+h2 { font-size: 17px; color: var(--green); }
+label, .label { display: block; margin-bottom: 8px; }
+input:not([type=checkbox]):not([type=radio]), select, textarea { display: block; width: 100%; min-height: 40px; padding: 9px 12px; }
+select { background-color: var(--background); }
+textarea { resize: vertical; min-height: 90px; overflow-wrap: anywhere; }
+input::placeholder, textarea::placeholder { color: var(--placeholder, #606060); }
+input[type=checkbox], input[type=radio] { accent-color: var(--green); width: 17px; height: 17px; vertical-align: middle; flex-shrink: 0; }
+[hidden] { display: none !important; }
+.container { max-width: 960px; margin: 0 auto; }
+.header { display: flex; align-items: center; gap: 32px; padding-top: 28px; }
+.logo { width: 155px; height: 40px; display: block; }
+.wallet-controls { margin-left: auto; display: flex; gap: 10px; }
+.wallet-controls select, .deposit-group select { appearance: none; background: var(--chevron) no-repeat right 14px center / 12px; }
+.wallet-controls select { width: 160px; color: var(--green); border-color: var(--green); padding-right: 36px; background-color: var(--outline); }
+#theme { width: auto; }
+.outline { border-color: var(--green); color: var(--green); background: var(--outline); }
+.outline:hover:not(:disabled) { background: var(--outline-hover); }
+.primary { background: var(--green); color: var(--background); border-color: var(--green); }
+.primary:hover:not(:disabled) { background: var(--primary-hover, #3bf0a1); }
+.full { width: 100%; }
+.batch-mode { display: flex; margin-bottom: 24px; }
+.batch-mode button { min-height: 34px; padding: 5px 14px; border-radius: 0; color: var(--muted); background: transparent; font-weight: 400; }
+.batch-mode button:first-child { border-radius: 4px 0 0 4px; }
+.batch-mode button:last-child { border-left: 0; border-radius: 0 4px 4px 0; }
+.batch-mode button[aria-pressed=true] { color: var(--green); border-color: var(--surface-border, #587b63); background: var(--surface-hover, #132d1e); }
+.deposit-group { display: grid; grid-template-columns: minmax(60px, 1fr) minmax(75px, 1.1fr) 58px 30px; gap: 8px; align-items: end; margin-bottom: 16px; }
+.deposit-group label { margin: 0; color: var(--muted); font-size: 11px; }
+.transaction-body .deposit-group select, .transaction-body .deposit-group input { margin: 6px 0 0; font-size: 13px; padding: 9px 7px; }
+.transaction-body .deposit-group select { padding-right: 26px; background-position: right 7px center; background-color: var(--background); }
+.deposit-group button { min-height: 40px; padding: 0; color: var(--muted); background: transparent; }
+.batch-add { padding: 4px 0; min-height: 30px; border: 0; color: var(--green); background: transparent; font-weight: 400; }
+.batch-summary { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); }
+.batch-summary strong { color: var(--green); font-weight: 400; text-align: right; overflow-wrap: anywhere; }
+#deposit-balance-row { margin-bottom: 16px; }
+#deposit-count, .batch-count { margin: 7px 0 0; font-size: 12px; }
+#deposit-batch-fields { margin-bottom: 26px; }
+.batch-approval { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; }
+.batch-approval button { min-height: 34px; padding: 5px 12px; font-size: 12px; }
+#batch-approvals { margin-bottom: 20px; }
+#batch-contract-details { font-size: 12px; overflow-wrap: anywhere; }
+#batch-contract-details[data-error=true] { color: var(--danger); }
+#deploy-batch-contract, #deployment-recovery { margin: 14px 0; }
+#deployment-hash { margin-bottom: 10px; }
+.batch-results { padding: 0; margin: 20px 0 0; list-style: none; }
+.batch-results li { padding: 11px 0; border-top: 1px solid var(--border); font-size: 12px; overflow-wrap: anywhere; }
+.batch-results .batch-result-title { display: flex; justify-content: space-between; gap: 10px; }
+.batch-results small { display: block; margin-top: 5px; color: var(--muted); }
+.batch-results [data-status=confirmed] { color: var(--green); }
+.batch-results [data-status=failed], .batch-results [data-status=reverted] { color: var(--danger); }
+#note-status { white-space: pre-line; }
+@media (max-width: 440px) { .deposit-group { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--border); } .deposit-group label:nth-child(3) { max-width: 90px; } .deposit-group button { justify-self: end; width: 44px; min-height: 44px; } .batch-approval { flex-wrap: wrap; } }
+main.container { padding-top: 48px; padding-bottom: 48px; }
+.columns { display: grid; grid-template-columns: 440px 440px; justify-content: space-between; gap: 32px; align-items: start; }
+.tabs { display: flex; justify-content: space-between; height: 47px; }
+.tabs button { position: relative; z-index: 1; min-height: 47px; padding: 9px 26px; border: 1px solid var(--green); border-bottom: 0; color: var(--green); background: var(--outline); font-size: 19px; border-radius: 4px 0 0 0; }
+.tabs button:first-child { border-right: 0; }
+.tabs button:last-child { border-left: 0; border-radius: 0 4px 0 0; }
+.tabs button::after { content: ""; position: absolute; top: -1px; bottom: 0; width: 23px; background: inherit; border: 1px solid var(--green); border-bottom: 0; z-index: -1; }
+.tabs button:first-child::after { right: -16px; transform: skewX(20deg); border-left: 0; border-radius: 0 4px 0 0; }
+.tabs button:last-child::after { left: -16px; transform: skewX(-20deg); border-right: 0; border-radius: 4px 0 0 0; }
+.tabs button[aria-selected=true] { background: var(--green); color: var(--background); }
+.transaction-body { border: 1px solid var(--green); border-radius: 0 0 4px 4px; padding: 24px 24px 32px; min-height: 274px; }
+.transaction-body select { margin-bottom: 22px; }
+.info { display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; border-radius: 2px; background: var(--green); color: var(--background); font-size: 10px; font-weight: 700; margin-left: 4px; cursor: help; }
+.amounts { display: flex; justify-content: space-between; position: relative; margin: 22px 0 30px; }
+.amounts::before { content: ""; position: absolute; height: 2px; top: 11px; left: 20px; right: 20px; background: var(--track, #2c4538); }
+.amount-choice { position: relative; text-align: center; margin: 0; cursor: pointer; font-size: 12px; }
+.amount-choice input { position: absolute; opacity: 0; }
+.amount-choice span::before { content: ""; display: block; width: 22px; height: 22px; border: 2px solid var(--green); border-radius: 50%; background: var(--background); margin: 0 auto 7px; }
+.amount-choice input:checked + span::before { background: var(--green); box-shadow: inset 0 0 0 5px var(--background); }
+.amount-choice input:focus-visible + span { outline: 2px solid var(--green); outline-offset: 4px; }
+.corner { display: inline-flex; align-items: center; gap: 16px; border: 1px solid var(--border); border-right: 0; border-bottom: 0; border-radius: 4px 0 0 0; padding: 10px 12px 10px 24px; height: 47px; position: relative; font-size: 19px; z-index: 1; }
+.corner::after { content: ""; position: absolute; z-index: -1; width: 26px; top: -1px; bottom: 0; right: -19px; border: 1px solid var(--border); border-left: 0; border-bottom: 0; border-radius: 0 4px 0 0; background: var(--background); transform: skewX(20deg); }
+.pool { color: var(--green); border: 1px solid var(--green); border-radius: 4px; padding: 2px 8px; background: var(--surface-raised, #0d1f16); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.box { padding: 24px; border: 1px solid var(--border); border-radius: 0 4px 4px 4px; min-height: 274px; }
+.stat-value { color: var(--green); font-size: 20px; margin-bottom: 20px; }
+.stats-list { margin: 0; }
+.stats-list > div { display: flex; justify-content: space-between; padding: 6px 8px; }
+.stats-list > div:nth-child(odd) { background: var(--surface, #171717); }
+.stats-list dd { margin: 0; color: var(--green); }
+#last-update { align-self: center; font-size: 11px; text-align: right; }
+.address { font-size: 11px; overflow-wrap: anywhere; margin-top: 18px; }
+.pool-state { margin-top: 14px; font-size: 12px; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.instances { margin-top: 48px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 12px; }
+.table-wrap { border: 1px solid var(--border); border-radius: 4px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; text-align: left; }
+th { font-weight: 400; color: var(--muted); background: var(--surface, #0b100d); }
+th, td { padding: 13px 16px; vertical-align: top; border-bottom: 1px solid var(--surface-border, #222); }
+tbody tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+td:last-child, td:nth-last-child(2) { text-align: right; }
+.state { color: var(--warning); }
+.state[data-state=ready] { color: var(--green); }
+.state[data-state=error] { color: var(--danger); }
+.instance-message { display: block; color: var(--muted); font-size: 11px; margin-top: 5px; min-width: 140px; max-width: 220px; overflow-wrap: anywhere; }
+.sync { min-width: 180px; }
+.sync small { color: var(--muted); display: block; margin-top: 3px; }
+progress { display: block; appearance: none; height: 3px; width: 100%; border: 0; margin: 9px 0 0; background: var(--track, #252525); }
+progress::-webkit-progress-bar { background: var(--track, #252525); }
+progress::-webkit-progress-value { background: var(--green); }
+progress::-moz-progress-bar { background: var(--green); }
+.instance-error { color: var(--danger); display: block; white-space: normal; margin-top: 6px; max-width: 240px; overflow-wrap: anywhere; }
+.chain { display: block; margin-top: 3px; }
+.live-logs { margin-top: 32px; border: 1px solid var(--border); border-radius: 4px; min-width: 0; }
+.live-logs summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; cursor: pointer; color: var(--green); }
+.live-logs summary::before { content: '›'; }
+.live-logs[open] summary::before { content: '⌄'; }
+.live-logs summary > span:first-child { margin-right: auto; }
+.live-logs summary:focus-visible, .logs:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+#logs-status { font-size: 11px; text-align: right; }
+.log-controls { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 12px; gap: 12px; }
+.log-controls label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.log-controls button { min-height: 30px; padding: 4px 14px; font-size: 12px; font-weight: 400; }
+.logs { height: 240px; overflow: auto; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface-raised, #070b08); font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.logs:empty::before { content: 'Waiting for backend logs…'; color: var(--muted); }
+.log-line[data-level=W] { color: var(--warning); }
+.log-line[data-level=E] { color: var(--danger); }
+.log-line[data-level=D] { color: var(--muted); }
+.withdraw-mode { display: flex; gap: 24px; margin: 20px 0 12px; }
+.withdraw-mode label { display: flex; align-items: center; gap: 5px; }
+#withdraw-panel input:not([type=radio]), #withdraw-panel textarea { margin-bottom: 18px; }
+.withdraw-note-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.withdraw-note-heading label { margin: 0; }
+.remove-withdraw-note { min-height: 28px; width: 28px; padding: 0; color: var(--muted); background: transparent; }
+.withdraw-note-row { margin-bottom: 18px; }
+#withdraw-notes textarea { margin-bottom: 0; }
+#withdraw-notes textarea[aria-invalid=true] { border-color: var(--danger); }
+.note-error { margin-top: 6px; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.privacy-warning { margin: 18px 0; color: var(--warning-title); font-size: 12px; line-height: 1.7; }
+#withdraw-confirm-dialog { border-color: var(--warning-border); background: var(--warning-panel); }
+#withdraw-confirm-title { color: var(--warning-title); font-size: 18px; }
+#submit-deposit, #submit-batch-withdraw { border-color: var(--warning-button, var(--warning-title)); background: var(--warning-button, var(--warning-title)); color: var(--warning-button-text, var(--warning-panel)); }
+#withdraw-confirm-dialog .note-tools { flex-wrap: wrap; }
+#check-note { margin-bottom: 12px; }
+#note-status { font-size: 12px; margin-bottom: 14px; overflow-wrap: anywhere; }
+#relayer-fee { font-size: 12px; margin-bottom: 12px; }
+#relayer-field .backup-check { margin-top: 12px; }
+#approve-token { margin-bottom: 12px; }
+#message { margin-top: 22px; overflow-wrap: anywhere; color: var(--green); }
+#message:empty { display: none; }
+#message[data-error=true], #backup-message[data-error=true], #wallet-message[data-error=true], #backup-confirm-message[data-error=true], #withdraw-total[data-error=true] { color: var(--danger); }
+footer { display: flex; justify-content: space-between; color: var(--footer, #6b6b6b); font-size: 12px; padding-bottom: 28px; gap: 16px; }
+dialog { width: 440px; max-width: calc(100% - 32px); padding: 24px; border: 1px solid var(--green); border-radius: 4px; color: var(--text); background: var(--background); }
+dialog::backdrop { background: var(--backdrop, rgba(5, 5, 5, .86)); }
+dialog h2 { margin-bottom: 18px; }
+dialog p { margin-bottom: 18px; font-size: 13px; }
+dialog textarea { min-height: 140px; color: var(--green); font-size: 12px; margin-bottom: 16px; }
+#receipt-title { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+#receipt-message { overflow-wrap: anywhere; }
+.spinner { flex: none; width: 18px; height: 18px; border: 2px solid var(--track, #30453b); border-top-color: var(--green); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+.note-tools { display: flex; gap: 10px; }
+.note-tools button { flex: 1; padding-left: 8px; padding-right: 8px; }
+.backup-check { display: flex; align-items: center; gap: 8px; margin: 22px 0 16px; font-size: 12px; }
+#backup-message { overflow-wrap: anywhere; margin: 18px 0; }
+#backup-confirm-dialog { width: 460px; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); padding: 28px; border: 2px solid var(--warning-border); border-radius: 16px; background: var(--warning-panel); box-shadow: 0 20px 100px var(--dialog-shadow, #000b); }
+#backup-confirm-dialog::backdrop { background: var(--backdrop, #000b); backdrop-filter: blur(4px); }
+.backup-warning { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 20px; border: 1px solid var(--warning-accent, #8b642b); border-radius: 14px; background: var(--warning-surface, #382a13); color: var(--warning-title); }
+#backup-confirm-title { margin-bottom: 16px; color: var(--warning-title); font-size: 22px; line-height: 1.4; }
+#backup-confirm-description { color: var(--warning-muted, #c5bbaa); line-height: 1.8; }
+#backup-confirm-description strong { display: block; margin-bottom: 8px; color: var(--warning-strong, #fff0d5); font-size: 15px; }
+#backup-confirm-message { overflow-wrap: anywhere; color: var(--green); font-size: 12px; }
+#backup-confirm-message:empty { display: none; }
+.backup-confirm-actions { display: grid; gap: 10px; margin-top: 24px; }
+.backup-confirm-actions button { min-height: 46px; border-radius: 8px; }
+#submit-deposit:hover:not(:disabled), #submit-batch-withdraw:hover:not(:disabled) { background: var(--warning-button-hover, #ffde9e); }
+#back-to-note { border-color: var(--warning-accent, #66543a); background: transparent; color: var(--warning-muted, #c5bbaa); font-weight: 400; }
+#wallet-dialog { width: 460px; padding: 28px; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); border: 1px solid var(--surface-border, #2c4436); border-radius: 24px; background: var(--wallet-background, #0b120e); box-shadow: 0 24px 100px var(--dialog-shadow, #0009); }
+#wallet-dialog::backdrop { background: var(--backdrop, #000a); backdrop-filter: blur(6px); }
+.wallet-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wallet-heading h2 { margin: 0; font-size: 22px; color: var(--wallet-title, #f3f8f5); letter-spacing: -.6px; }
+.wallet-close { display: grid; place-items: center; flex-shrink: 0; width: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-hover, #1b2821); color: var(--wallet-muted, #9eafa4); }
+#wallet-dialog .wallet-intro { margin: 8px 0 24px; color: var(--wallet-muted, #8eaa99); font-size: 12px; }
+.wallet-options { display: grid; gap: 12px; }
+.wallet-option { display: flex; align-items: center; gap: 16px; width: 100%; padding: 20px 16px; border-color: var(--surface-border, #273c30); border-radius: 16px; background: var(--surface-raised, #121f17); text-align: left; }
+.wallet-option:hover:not(:disabled) { background: var(--surface-hover, #192d20); }
+.wallet-icons { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 76px; }
+.wallet-icons img { display: block; border-radius: 10px; box-shadow: 0 0 0 3px var(--surface-raised, #121f17); }
+.wallet-icons img + img { margin-left: -16px; }
+.wallet-option-copy { display: grid; flex: 1; gap: 5px; min-width: 0; }
+.wallet-option-copy strong { font-size: 15px; }
+.wallet-option-copy small { color: var(--wallet-muted, #8eaa99); font-size: 11px; line-height: 1.6; font-weight: 400; }
+.wallet-badge { justify-self: start; margin-top: 3px; padding: 2px 7px; border-radius: 5px; background: var(--surface, #203329); color: var(--wallet-muted, #abc6b6); font-size: 10px; font-weight: 400; }
+#browser-status[data-detected=true] { background: var(--surface-hover, #1a3b29); color: var(--green); }
+.wallet-arrow { flex-shrink: 0; color: var(--wallet-muted, #6c8c79); }
+.wallet-option:hover:not(:disabled) .wallet-arrow { color: var(--green); }
+#wallet-message { overflow-wrap: anywhere; margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--surface-border, #294232); border-radius: 12px; background: var(--surface-raised, #112019); color: var(--green); font-size: 12px; }
+#wallet-message:empty { display: none; }
+#wallet-message[data-error=true] { border-color: var(--wallet-error-border, #5b3038); background: var(--wallet-error, #29191e); }
+.wallet-session { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--surface-border, #273c30); font-size: 12px; color: var(--wallet-muted, #8eaa99); }
+#wallet-account::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--green); }
+.wallet-session-actions { display: flex; gap: 8px; }
+.wallet-session-actions button { min-height: 32px; padding: 4px 10px; border-radius: 8px; background: transparent; font-size: 11px; font-weight: 400; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width: 1008px) { .container { margin-left: 24px; margin-right: 24px; } .columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .header { gap: 24px; } }
+@media (max-width: 760px) { .header { flex-wrap: wrap; gap: 20px; } .wallet-controls { width: 100%; margin-left: 0; } .wallet-controls select, .wallet-controls button { flex: 1; } main.container { padding-top: 30px; } .columns { grid-template-columns: minmax(0, 440px); justify-content: center; gap: 32px; } .instances { margin-top: 32px; } .corner { font-size: 18px; } .section-title { align-items: baseline; } .section-title .muted { font-size: 11px; } }
+@media (max-width: 520px) { .wallet-controls { flex-wrap: wrap; } .wallet-controls select, .wallet-controls button { flex: 1 0 auto; } }
+@media (max-width: 380px) { .container { margin-left: 16px; margin-right: 16px; } .tabs button { padding: 10px 20px; font-size: 17px; } .transaction-body, .box { padding: 20px; } .corner { padding-left: 20px; gap: 10px; } footer { flex-wrap: wrap; } }
+@media (max-width: 480px) { #wallet-dialog { padding: 22px 18px; border-radius: 20px; } .wallet-heading h2 { font-size: 20px; } .wallet-option { gap: 12px; padding: 16px 12px; } .wallet-icons { width: 64px; } .wallet-icons img { width: 32px; height: 32px; border-radius: 9px; } .wallet-option-copy strong { font-size: 14px; } .wallet-arrow { width: 14px; } }
