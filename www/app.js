@@ -1,3 +1,4 @@
+import { connectWalletConnect } from './wallet.js';
 
 const $ = (id) => document.getElementById(id);
 const number = (value) => value == null ? '—' : Number(value).toLocaleString('en-US');
@@ -575,6 +576,7 @@ function updateControls() {
     $('connect-browser').disabled = busy;
     $('browser-status').textContent = window.ethereum ? 'Detected' : 'Not detected';
     $('browser-status').dataset.detected = !!window.ethereum;
+    $('connect-walletconnect').disabled = busy;
     $('switch-wallet-account').disabled = busy;
     $('switch-wallet-account').hidden = !provider || provider !== window.ethereum;
     $('disconnect-wallet').disabled = busy;
@@ -619,8 +621,12 @@ async function walletRequest(walletProvider, method, params, failure) {
 
 async function wallet(instance) {
     if (!provider) {
-        if (!window.ethereum) throw new Error('No browser wallet found.');
-        bindWallet(window.ethereum);
+        if (window.ethereum) bindWallet(window.ethereum);
+        else {
+            checkBackend(instance?.id || selected);
+            message('Connecting through WalletConnect…');
+            bindWallet(await connectWalletConnect(snapshot.walletconnect_project_id, walletChains()));
+        }
     }
     const currentProvider = provider;
     message('Requesting wallet account access. Confirm in your wallet if prompted…');
@@ -645,7 +651,7 @@ async function wallet(instance) {
 }
 
 async function connectBrowserWallet() {
-    if (!window.ethereum) throw new Error('No browser wallet found.');
+    if (!window.ethereum) throw new Error('No browser wallet found. Use WalletConnect instead.');
     bindWallet(window.ethereum);
     await wallet(pool());
     $('wallet-dialog').close();
@@ -810,6 +816,12 @@ $('switch-wallet-account').onclick = () => run(async () => {
     }
     await connectBrowserWallet();
 });
+$('connect-walletconnect').onclick = () => run(async () => {
+    checkBackend(selected);
+    bindWallet(await connectWalletConnect(snapshot.walletconnect_project_id, walletChains()));
+    await wallet(pool());
+    message('Wallet connected.');
+});
 $('disconnect-wallet').onclick = () => run(async () => {
     const previous = provider;
     const browser = previous && previous === window.ethereum;
@@ -819,6 +831,11 @@ $('disconnect-wallet').onclick = () => run(async () => {
     $('wallet-dialog').close();
     message(revoked ? 'Wallet disconnected.' : 'Wallet disconnected here. Manage this site’s permissions in your browser wallet.');
 });
+$('copy-wallet-uri').onclick = async () => {
+    if (!$('wallet-uri').value) { message('Waiting for the connection link…', true); return; }
+    try { await navigator.clipboard.writeText($('wallet-uri').value); message('Connection link copied.'); }
+    catch { $('wallet-uri').focus(); $('wallet-uri').select(); message('Select and copy the connection link manually.', true); }
+};
 for (const name of ['deposit', 'withdraw']) {
     $(`${name}-panel`).addEventListener('invalid', (event) => message(event.target.validationMessage, true), true);
     $(`${name}-tab`).onclick = () => {
@@ -1120,6 +1137,10 @@ async function withdrawBatch() {
     const remaining = withdrawalResults.filter((item) => item.status !== 'confirmed').length;
     message(remaining ? `${notes.length - remaining}/${plural(notes.length, 'withdrawal')} confirmed. ${remaining} remaining; retry to continue.`
         : notes.length === 1 ? '1 withdrawal confirmed.' : `${notes.length} withdrawals confirmed in separate transactions.`, !!remaining);
+}
+
+function walletChains() {
+    return [...new Set(snapshot.instances.map((item) => item.chain_id))];
 }
 
 function bindWallet(next) {

@@ -171,7 +171,19 @@
           <span class="wallet-option-copy"><strong>Browser wallet</strong><small>MetaMask, OneKey, Rabby &amp; more</small><span id="browser-status" class="wallet-badge">Browser extension</span></span>
           <svg class="wallet-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
         </button>
+        <button id="connect-walletconnect" class="wallet-option" type="button">
+          <span class="wallet-icons" aria-hidden="true"><img class="walletconnect-icon" src="assets/wallets/walletconnect.svg" alt="" width="48" height="48"></span>
+          <span class="wallet-option-copy"><strong>WalletConnect</strong><small>Scan with your mobile wallet</small><span class="wallet-badge">QR code</span></span>
+          <svg class="wallet-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+        </button>
       </div>
+    </div>
+    <div id="wallet-qr" hidden>
+      <p class="wallet-intro">Scan with your wallet to connect.</p>
+      <div class="wallet-qr-frame"><img id="wallet-qr-image" alt="WalletConnect pairing QR code" width="256" height="256"></div>
+      <label class="wallet-link-label" for="wallet-uri">Or use the connection link</label>
+      <input id="wallet-uri" readonly autocomplete="off" spellcheck="false">
+      <button id="copy-wallet-uri" class="outline full" type="button">Copy connection link</button>
     </div>
     <p id="wallet-message" role="status" aria-live="polite"></p>
     <div id="wallet-session" class="wallet-session" hidden>

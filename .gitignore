@@ -4,6 +4,7 @@
 __pycache__/
 backup/
 logs/
+node_modules/
 contracts/build/
 db/*.sqlite*
 db/LICENSE
