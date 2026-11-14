@@ -28,6 +28,8 @@
 
 # Tornado Cash Redux
 
+![Local WebUI](/assets/readme_home.png)
+
 A Python implementation to interact with Tornado Cash smart contracts.  
 
 Similar to the original [tornado-cli](https://github.com/tornadocash/tornado-cli), but more features and better experience
@@ -41,7 +43,8 @@ Similar to the original [tornado-cli](https://github.com/tornadocash/tornado-cli
   - [Zero-knowledge proof runtime (Optional)](#zero-knowledge-proof-runtime-optional)
 - [Running Unittests](#running-unittests)
 - [Functionality Testing](#functionality-testing)
-- [Usage & Tutorial](#usage--tutorial)
+- [WebUI](#webui)
+- [CLI Usage & Tutorial](#cli-usage--tutorial)
   - [Deposit](#deposit)
   - [Batch Deposit](#batch-deposit)
   - [Offline Deposit](#offline-deposit)
@@ -92,7 +95,7 @@ It is recommended to keep the program running to stay synchronized with the bloc
 
 ### RPC Service (Optional)
 
-If RPC error `ADDRESS_SANCTIONED` occurs during deposit or withdrawal, or any RPC errors during the syncing process, please change to another RPC provider manually, replace the `RPC_URLS` variable in `config.py` with your own endpoint.  
+Configure RPC endpoints in `RPC_URLS` in `config.py`.
 
 ![](/assets/readme_rpc.png)
 
@@ -139,8 +142,44 @@ Chainlink 👉 [https://faucets.chain.link/sepolia](https://faucets.chain.link/s
 Google 👉 [https://cloud.google.com/application/web3/faucet/ethereum/sepolia](https://cloud.google.com/application/web3/faucet/ethereum/sepolia)    
 QuickNode 👉 [https://faucet.quicknode.com/ethereum/sepolia](https://faucet.quicknode.com/ethereum/sepolia)  
 
+Sepolia DAI can be minted from the [Aave Faucet contract on Etherscan](https://sepolia.etherscan.io/address/0xC959483DBa39aa9E78757139af0e9a2EDEb3f42D#writeContract).
 
-## Usage & Tutorial
+1. Open `Contract → Write Contract → Connect to Web3`
+2. Expand `mint` and enter the following values.
+
+| Parameter | Value                                               |
+|-----------|-----------------------------------------------------|
+| `token` | `0xFF34B3d4Aee8ddCd6F9AFFFB6Fe49bD371b8a357`        |
+| `to` | Your wallet address                                 |
+| `amount` | `10000000000000000000000` (10,000 DAI, 18 decimals) |
+
+3. Click **Write** and confirm the transaction in your wallet. You need a small amount of Sepolia ETH for gas.
+
+
+## WebUI
+
+<p align="center">
+  <img src="/assets/readme_webui_1_deposit.png" alt="Deposit" width="32%">
+  <img src="/assets/readme_webui_2_deposit.png" alt="Withdraw" width="32%">
+  <img src="/assets/readme_webui_3_withdraw.png" alt="Withdraw" width="32%">
+</p>
+
+Configure networks and ports with `WEBUI_*` in `config.py` then start the local WebUI:  
+
+```bash
+python webui.py
+```
+
+Connect through a browser wallet or **WalletConnect**. For WalletConnect, set `WEBUI_WALLETCONNECT_PROJECT_ID` in `config.py`.  
+
+Back up your note before depositing and keep it private. ERC20 deposits may require a separate approval transaction.  
+
+**Local use only:** keep `WEBUI_HOST = '127.0.0.1'`. Do not expose the service to a LAN or the public Internet.  
+
+
+## CLI Usage & Tutorial
+
+The CLI examples below use synthetic notes, keys, and transaction hashes. Example log times use Madrid local time.
 
 ### Deposit
 
@@ -152,22 +191,25 @@ The private key is used to provide ETHs for deposit and pay for gas fees, make s
 # <symbol>: Name of the token, values: eth, bnb, pol, avax, dai, cdai, usdt, usdc, wbtc. Case insensitive
 # <unit>  : Tornado unit of coins, eg: 0.1, 1, 10, ...
 
-> python cli.py --deposit 0x0f36dead4beafdead4beafdead4beafdead4beafdead4beafdead4beafde9a66 sepolia eth 0.1
+> python cli.py --deposit 0xb4eee619500e058e19d85faa4efd3d68df0f93bc2551267aa88a947fd3d698f5 sepolia eth 0.1
 ```
 
 If succeeded, you will see logs like below, and the generated note will be printed to the console and saved to a backup file under the `./backup` directory.  
 The `note` has full access to the deposited funds, please keep it private and secure.
 ```log
-[I 2025-10-10 10:22:21:477 tid=43284 cli] Depositing Sepolia 0.1 eth (cli.py:357)
-[I 2025-10-10 10:22:21:570 tid=43284 cli] IMPORTANT: Please save the note text below and keep it private (cli.py:377)
-[I 2025-10-10 10:22:21:570 tid=43284 cli] IMPORTANT: sepolia-eth-0.1-d27c296fdb802bea47c3675b296a67a72daf9ad7398f4c5ba57c897d2e3215-0a2cda03f6c56f7e3b65cef86fb228db9ab6e5630078101d77fb80a93fe81f (cli.py:378)
-[I 2025-10-10 10:22:26:970 tid=43284 Tornado] deposit(from=0xA09CBdDb54c7bD239F80b252d25002001580BafF) succeed, tx hash: 9607560ad3795d860e1be630ba32c121540f88c0d662d1782ede29eb46b0afe5 (core.py:271)
-[I 2025-10-10 10:22:26:971 tid=43284 cli] IMPORTANT: Note backup saved to ~/tornadocash-redux/backup/2025-10-10_10.22.21.570_sepolia_eth_0.1.txt (cli.py:388)
+[I 2026-11-13 19:20:21:477 tid=43284 cli] Depositing Sepolia 0.1 eth (cli.py:357)
+[I 2026-11-13 19:20:21:570 tid=43284 cli] IMPORTANT: Please save the note text below and keep it private (cli.py:377)
+[I 2026-11-13 19:20:21:570 tid=43284 cli] IMPORTANT: sepolia-eth-0.1-1141d3df38392f88e244fb4afe2fe00a1e093407a0a9b47bb9c596f24b7c77-409b0a7ae893311f7d02dbff4ed717fbc628419b797b25a5f9560d1bfe9c1b (cli.py:378)
+[I 2026-11-13 19:20:26:970 tid=43284 Tornado] deposit(from=0x37F449B4C5275C19BB1D95F07C5b7dF2503FABeB) succeed, tx hash: c4def9b58c8a06a8748af7437ac1666853eb52b716adffcc517c8b4d5ade6530 (core.py:271)
+[I 2026-11-13 19:20:26:971 tid=43284 cli] IMPORTANT: Note backup saved to ./backup/2026-11-13_19.20.21.570_sepolia_eth_0.1.txt (cli.py:388)
 ```
 
 ### Batch Deposit
 
-A very convenient way if you have multiple addresses on different chains that holds multiple kinds of assets, this feature do it at once :)  
+Deposits on the same chain are combined into one transaction, including native and ERC20 tokens. Each chain uses a separate transaction.
+For an ERC20 batch, deploy [BatchDepositorERC20](contracts/BatchDepositorERC20.sol) or [BatchDepositorUniversal](contracts/BatchDepositorUniversal.sol) according to the tokens in the batch, approve each token to its deployed address, then call it to make all deposits.
+The Python client compiles the contracts with native `solc 0.8.30` on first use, downloading it if needed, and caches the bytecode locally. Node.js is not required.
+The deployment sends no native tokens. Native tokens in a mixed batch are sent with the final deposit call. All notes are backed up before submission.
 
 ```bash
 # python cli.py --deposit_batch <key> <json>
@@ -175,7 +217,7 @@ A very convenient way if you have multiple addresses on different chains that ho
 # <json>: JSON string describing the batch, eg:
 #         {"ethereum": {"eth": {"10": 100, "100": 20}}, "polygon": {"pol": {"100000": 1000}}}
 
-> python cli.py --deposit_batch 0x0f36dead4beafdead4beafdead4beafdead4beafdead4beafdead4beafde9a66 "{'sepolia':{'eth':{'0.1':3}}}"
+> python cli.py --deposit_batch 0xb4eee619500e058e19d85faa4efd3d68df0f93bc2551267aa88a947fd3d698f5 "{'sepolia':{'eth':{'0.1':3}}}"
 ```
 
 
@@ -189,31 +231,31 @@ Create a note on the offline machine, scan the QR code or copy the invoice text 
 # <unit>  : Tornado unit of coins, eg: 0.1, 1, 10, ...
 
 > python cli.py --create_note sepolia eth 0.1
-[I 2025-10-10 09:46:45:111 tid=39724 stdout]  ▄▄▄▄▄▄▄ ▄▄▄         ▄ ▄▄▄  ▄  ▄▄▄▄▄▄▄ 
-[I 2025-10-10 09:46:45:111 tid=39724 stdout]  █ ▄▄▄ █  █▄█ ▀ ███ █▄█▀▄█▀▄▄█ █ ▄▄▄ █ 
-[I 2025-10-10 09:46:45:112 tid=39724 stdout]  █ ███ █ ██ █▄▀█▄█▄  █ ████ █▀ █ ███ █ 
-[I 2025-10-10 09:46:45:112 tid=39724 stdout]  █▄▄▄▄▄█ █ █ █ ▄ ▄ █▀▄▀▄ █▀▄ █ █▄▄▄▄▄█ 
-[I 2025-10-10 09:46:45:113 tid=39724 stdout]  ▄   ▄ ▄▄█▄▀█▄▄▄███▄▄▀█▄ ▀ ▄▀█▄▄▄▄▄  ▄ 
-[I 2025-10-10 09:46:45:113 tid=39724 stdout]   ▄██▄█▄▄ ▄█▀█▄ ▄ ▄  █▄▄█▀▀ █▄▀ █▀█▄▀  
-[I 2025-10-10 09:46:45:113 tid=39724 stdout]  ▀  ▄▀▀▄▀ ██  ▀▄▀▀█▀█▄█▀█▄ █ █▄▄▄  █▄▄ 
-[I 2025-10-10 09:46:45:114 tid=39724 stdout]  █ ▄  ▀▄    ▀ █▄█▀▄▀ ▄ ▀█▄▀▄█▄▀ ▄▀▄▄█  
-[I 2025-10-10 09:46:45:114 tid=39724 stdout]    ▀ ▄ ▄ █ ██▀  ▀ █ ▄ █▀▀▀ █▄ ▀▄█▀ ██▄ 
-[I 2025-10-10 09:46:45:114 tid=39724 stdout]  █     ▄▀▀ █ ▀ ▄ █ █ ▀███▀█ ██▀ ▄█     
-[I 2025-10-10 09:46:45:114 tid=39724 stdout]  ▄█▀ ▀▀▄▄█▀▀▄▀ █▄▄█▄▄▄█ ▀█ ▄  █▄▄ ██ █ 
-[I 2025-10-10 09:46:45:114 tid=39724 stdout]  █  ▀█ ▄   ▄▄▄  █     ▄▀█ ▀▄█▄▄ █▀▀▀   
-[I 2025-10-10 09:46:45:114 tid=39724 stdout]  ▀█▀▄▄█▄   █▀▄▀▄███▀█ █ ▀  ▀▀██▄▄  ██▄ 
-[I 2025-10-10 09:46:45:115 tid=39724 stdout]  ▀▀▀ ██▄▀ ▄▄ ▄█ ▄  ▀ ▀███▀█▀█ ▄▄ ▀▄▄▀  
-[I 2025-10-10 09:46:45:115 tid=39724 stdout]  ▄▄▄▄▄ ▄▄▀▀▄▄█▀▄▀██▄▄▀█▀ ▀  ▀██▄▄▄██▀▄ 
-[I 2025-10-10 09:46:45:115 tid=39724 stdout]  ▄▄▄▄▄▄▄ █ ▀▄▄▄██▄   █ █████▀█ ▄ ███   
-[I 2025-10-10 09:46:45:115 tid=39724 stdout]  █ ▄▄▄ █ ▄   ▄▄   ▀▄ ▄█▄    ▀█▄▄▄█ █▄▄ 
-[I 2025-10-10 09:46:45:115 tid=39724 stdout]  █ ███ █  ▄█ ▀▄█ █ █ ▄▄ █▀▀█▀ ▄██ ▀ ▀▀ 
-[I 2025-10-10 09:46:45:116 tid=39724 stdout]  █▄▄▄▄▄█ ▄▄ █▄▀▀▄▄█▄▄ █▀ █ ▀█ █ █ ███▄ 
-[I 2025-10-10 09:46:45:116 tid=39724 stdout]                                        
-[I 2025-10-10 09:46:45:116 tid=39724 cli] Scan the QR code to transfer the invoice to online machine (cli.py:532)
-[I 2025-10-10 09:46:45:116 tid=39724 cli] IMPORTANT: Please save the note text below and keep it private (cli.py:533)
-[I 2025-10-10 09:46:45:116 tid=39724 cli] Note     : sepolia-eth-0.1-e7d384e9ee682ea4c209893b0d618094bedfb7b580400686fc6ef350514667-bb5654636d95ffb21235a79cb504a847f4c0eba695346491fa105761e7a0f8 (cli.py:534)
-[I 2025-10-10 09:46:45:116 tid=39724 cli] Invoice  : sepolia-eth-0.1-122ec0ef7098492ae61f26695edd4c070ca40ca6b1455ff64843f53ad03780cb (cli.py:535)
-[I 2025-10-10 09:46:45:116 tid=39724 cli] IMPORTANT: Note backup saved to ~/tornadocash-redux/backup/2025-10-10_09.46.45.105_sepolia_eth_0.1.txt (cli.py:536)
+[I 2026-11-13 19:05:45:111 tid=39724 stdout]  ▄▄▄▄▄▄▄  ▄▄▄ ▄▄▄▄▄ ▄ ▄▄▄▄▄▄   ▄▄▄▄▄▄▄ 
+[I 2026-11-13 19:05:45:111 tid=39724 stdout]  █ ▄▄▄ █ ▄▄█   ▀▀█ █ ▀▄▀ █ ██▄ █ ▄▄▄ █ 
+[I 2026-11-13 19:05:45:112 tid=39724 stdout]  █ ███ █ █▄█▀ ▀▀█▄▀▀▄▀▄▄█▀▀▄▀  █ ███ █ 
+[I 2026-11-13 19:05:45:112 tid=39724 stdout]  █▄▄▄▄▄█ █▀█ ▄ ▄▀█▀▄ █ █ █▀▄▀█ █▄▄▄▄▄█ 
+[I 2026-11-13 19:05:45:113 tid=39724 stdout]  ▄ ▄▄▄▄▄ ▀▀▄ ▄ █▀▄▄▀ █▀  ▀▄▄█  ▄▄▄▄▄   
+[I 2026-11-13 19:05:45:113 tid=39724 stdout]  █ ▀▄  ▄█  ▄▄   █▄▀█▀▄█▀▀▀  ▄▀█▄▄ █▄█▄ 
+[I 2026-11-13 19:05:45:113 tid=39724 stdout]     ▄▄▄▄▄▀▀▄ █ ▀█▄▄█▄▄▀  ▀▄▀▄▄██ █▄▄██ 
+[I 2026-11-13 19:05:45:114 tid=39724 stdout]  ▀▀▀██▀▄ ▀▀ ▄▄█▄▄ ▄▄▀ ▄▀▀█▄█▄ █▄█ █ ▄▄ 
+[I 2026-11-13 19:05:45:114 tid=39724 stdout]   ▀██▄█▄▄▀▄▄▄ ▀██▀▄▄ █▀▀  ▄▄ █▄███▄▄▄▄ 
+[I 2026-11-13 19:05:45:114 tid=39724 stdout]  █▀██  ▄▄ ██ █▀▄▀▀  ▀▄▀▀▀▀▄ ▄▄▄▄ ▄▄ ▄▄ 
+[I 2026-11-13 19:05:45:114 tid=39724 stdout]  ▄  ▄▀█▄▄▀▀█▀ █▀ ▀▄▄▄▄▀▀▀▀▄██ ▄█▀▄▄▄▀▄ 
+[I 2026-11-13 19:05:45:114 tid=39724 stdout]  ▄▄▀▀ ▄▄ ▀ ▄▀   ▄█▄ ▀▄▀▀▀▀  ▄ ▄▄▄  █▀▄ 
+[I 2026-11-13 19:05:45:114 tid=39724 stdout]    ▀█  ▄▄  ▀ ▀▀▄▄█▄█▀▄▀ ▀█▄▀█ ▀█▄▄▄▄ ▀ 
+[I 2026-11-13 19:05:45:115 tid=39724 stdout]  █▀ █ ▀▄▄▄ ▀█▀█▄█▄  ▀▄█▀▀ ▄█▄█▀  ▄▄ █▄ 
+[I 2026-11-13 19:05:45:115 tid=39724 stdout]  █ █▄▀▀▄▄▀█ █  ▀█▄▄▄▀ ▀▀▀▄▄▄██▄██▄▀▄ █ 
+[I 2026-11-13 19:05:45:115 tid=39724 stdout]  ▄▄▄▄▄▄▄ ▀▀▀ ▄ ▄▄▄▀▄▀█▀█▀▄▄▄ █ ▄ █▄▀▀▄ 
+[I 2026-11-13 19:05:45:115 tid=39724 stdout]  █ ▄▄▄ █ █▀█▀▀█▀█▀ █ █▀▀  ▄▀██▄▄▄█▄▄▀▄ 
+[I 2026-11-13 19:05:45:115 tid=39724 stdout]  █ ███ █ ███▄▄▀▀▀▀ █▀▄▄▀▀█▄▀ ▄ ▀▄▀ ▄██ 
+[I 2026-11-13 19:05:45:116 tid=39724 stdout]  █▄▄▄▄▄█ ▄▄▀ █▀▄ █▄▄▄▄▀ ▀█▄█▀▀██▀▄▄▄▄█ 
+[I 2026-11-13 19:05:45:116 tid=39724 stdout]                                        
+[I 2026-11-13 19:05:45:116 tid=39724 cli] Scan the QR code to transfer the invoice to online machine (cli.py:532)
+[I 2026-11-13 19:05:45:116 tid=39724 cli] IMPORTANT: Please save the note text below and keep it private (cli.py:533)
+[I 2026-11-13 19:05:45:116 tid=39724 cli] Note     : sepolia-eth-0.1-6229c699ca838a923531bba7981341309c010ed3acd1e7296d078d1f126aea-1e472a732e767035e4d6efa180c4211e392634261b8bc612842609b99d3e69 (cli.py:534)
+[I 2026-11-13 19:05:45:116 tid=39724 cli] Invoice  : sepolia-eth-0.1-13fcdc40f03185c458855157d386bdd7f694e5ea2d2fa727c186927939916c68 (cli.py:535)
+[I 2026-11-13 19:05:45:116 tid=39724 cli] IMPORTANT: Note backup saved to ./backup/2026-11-13_19.05.45.105_sepolia_eth_0.1.txt (cli.py:536)
 ```
 
 
@@ -223,9 +265,9 @@ On the online machine, use the `--deposit_invoice` command to make the deposit.
 # <key>    : Private key to pay the gas fee, hex string, '0x' prefix is optional
 # <invoice>: Tornado note invoice text generated by '--create_note' or '--note_detail'
              
-> python cli.py --deposit_invoice 0x0f36dead4beafdead4beafdead4beafdead4beafdead4beafdead4beafde9a66 sepolia-eth-0.1-122ec0ef7098492ae61f26695edd4c070ca40ca6b1455ff64843f53ad03780cb
-[I 2025-10-10 09:48:57:807 tid=35492 cli] Depositing Sepolia 0.1 eth (cli.py:357)
-[I 2025-10-10 09:49:03:674 tid=35492 Tornado] deposit(from=0xA09CBdDb54c7bD239F80b252d25002001580BafF) succeed, tx hash: b16ed68f119b80e8e8a3a3df65bf590917fa4262518b5ed2ff680c8511490bca (core.py:271)
+> python cli.py --deposit_invoice 0xb4eee619500e058e19d85faa4efd3d68df0f93bc2551267aa88a947fd3d698f5 sepolia-eth-0.1-13fcdc40f03185c458855157d386bdd7f694e5ea2d2fa727c186927939916c68
+[I 2026-11-13 19:07:57:807 tid=35492 cli] Depositing Sepolia 0.1 eth (cli.py:357)
+[I 2026-11-13 19:08:03:674 tid=35492 Tornado] deposit(from=0x37F449B4C5275C19BB1D95F07C5b7dF2503FABeB) succeed, tx hash: 0d68e38417d140d00c2e91c99e23d0d6f1272a0fbc19b267d5ffb8a49d951fd8 (core.py:271)
 ```
 
 
@@ -239,16 +281,16 @@ The private key is used to pay for gas fees, make sure it has enough ETH.
 # <key/relayer_url>: Relayer URL, or a private key to pay the gas fee in hex string, '0x' prefix is optional
      
 > python cli.py --withdraw \
-    sepolia-eth-0.1-e7d384e9ee682ea4c209893b0d618094bedfb7b580400686fc6ef350514667-bb5654636d95ffb21235a79cb504a847f4c0eba695346491fa105761e7a0f8 \
-    0xA09CBdDb54c7bD239F80b252d25002001580BafF \
-    0x0f36dead4beafdead4beafdead4beafdead4beafdead4beafdead4beafde9a66
+    sepolia-eth-0.1-6229c699ca838a923531bba7981341309c010ed3acd1e7296d078d1f126aea-1e472a732e767035e4d6efa180c4211e392634261b8bc612842609b99d3e69 \
+    0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377 \
+    0xb4eee619500e058e19d85faa4efd3d68df0f93bc2551267aa88a947fd3d698f5
 ```
 
 With a relayer service, the private key is not required, but the relayer will charge a fee from the withdrawn amount.
 ```bash
 > python cli.py --withdraw \
-    sepolia-eth-0.1-e7d384e9ee682ea4c209893b0d618094bedfb7b580400686fc6ef350514667-bb5654636d95ffb21235a79cb504a847f4c0eba695346491fa105761e7a0f8 \
-    0xA09CBdDb54c7bD239F80b252d25002001580BafF \
+    sepolia-eth-0.1-6229c699ca838a923531bba7981341309c010ed3acd1e7296d078d1f126aea-1e472a732e767035e4d6efa180c4211e392634261b8bc612842609b99d3e69 \
+    0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377 \
     https://eth.t-relayer.com
 ```
 
@@ -257,34 +299,34 @@ The withdrawal takes about 30 seconds with the prefetched database cache, the la
 
 If succeeded, you will see logs like below.  
 ```log
-[I 2025-10-10 09:54:27:646 tid=44584 Tornado] Rebuilding merkle tree from database, please wait... (core.py:76)
-[I 2025-10-10 09:54:27:873 tid=44584 MerkleTree.Memory] Level 0 rebuilt, size: 730 (merkle_tree.py:128)
-[I 2025-10-10 09:54:27:982 tid=44584 MerkleTree.Memory] Level 1 rebuilt, size: 365 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:036 tid=44584 MerkleTree.Memory] Level 2 rebuilt, size: 183 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:063 tid=44584 MerkleTree.Memory] Level 3 rebuilt, size: 92 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:076 tid=44584 MerkleTree.Memory] Level 4 rebuilt, size: 46 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:084 tid=44584 MerkleTree.Memory] Level 5 rebuilt, size: 23 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:088 tid=44584 MerkleTree.Memory] Level 6 rebuilt, size: 12 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:089 tid=44584 MerkleTree.Memory] Level 7 rebuilt, size: 6 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:091 tid=44584 MerkleTree.Memory] Level 8 rebuilt, size: 3 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:091 tid=44584 MerkleTree.Memory] Level 9 rebuilt, size: 2 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:092 tid=44584 MerkleTree.Memory] Level 10 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:093 tid=44584 MerkleTree.Memory] Level 11 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:094 tid=44584 MerkleTree.Memory] Level 12 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:094 tid=44584 MerkleTree.Memory] Level 13 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:095 tid=44584 MerkleTree.Memory] Level 14 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:096 tid=44584 MerkleTree.Memory] Level 15 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:096 tid=44584 MerkleTree.Memory] Level 16 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:097 tid=44584 MerkleTree.Memory] Level 17 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:097 tid=44584 MerkleTree.Memory] Level 18 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:098 tid=44584 MerkleTree.Memory] Level 19 rebuilt, size: 1 (merkle_tree.py:128)
-[I 2025-10-10 09:54:28:098 tid=44584 Tornado] Merkle tree ready (core.py:83)
-[I 2025-10-10 09:54:28:608 tid=30988 EventPoller] 133 blocks behind, latest block number: 9379475 (blockchain.py:238)
-[I 2025-10-10 09:54:30:615 tid=30988 cli] Sepolia@0.1ETH, synced 133 blocks from 9379343 to 9379475, progress: 100.00%, deposits: 1, withdrawals: 1 (cli.py:267)
-[I 2025-10-10 09:54:30:615 tid=30988 EventPoller] Synced to block 9379475 (blockchain.py:317)
-[I 2025-10-10 09:54:30:615 tid=30988 cli] Sepolia@0.1ETH, catch up to the latest blockchain (cli.py:258)
-[I 2025-10-10 09:54:36:408 tid=44584 Tornado] withdraw(to=0xA09CBdDb54c7bD239F80b252d25002001580BafF), proof generated for commitment: 0x122ec0ef7098492ae61f26695edd4c070ca40ca6b1455ff64843f53ad03780cb (core.py:420)
-[I 2025-10-10 09:54:38:586 tid=44584 Tornado] withdraw(to=0xA09CBdDb54c7bD239F80b252d25002001580BafF) succeed, tx hash: 0x71fde15c7ff5e84886f664ab5dcf78b9d0a6b607c8d6c52ad37749ec9287bc0b (core.py:532)
+[I 2026-11-13 19:13:27:646 tid=44584 Tornado] Rebuilding merkle tree from database, please wait... (core.py:76)
+[I 2026-11-13 19:13:27:873 tid=44584 MerkleTree.Memory] Level 0 rebuilt, size: 730 (merkle_tree.py:128)
+[I 2026-11-13 19:13:27:982 tid=44584 MerkleTree.Memory] Level 1 rebuilt, size: 365 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:036 tid=44584 MerkleTree.Memory] Level 2 rebuilt, size: 183 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:063 tid=44584 MerkleTree.Memory] Level 3 rebuilt, size: 92 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:076 tid=44584 MerkleTree.Memory] Level 4 rebuilt, size: 46 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:084 tid=44584 MerkleTree.Memory] Level 5 rebuilt, size: 23 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:088 tid=44584 MerkleTree.Memory] Level 6 rebuilt, size: 12 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:089 tid=44584 MerkleTree.Memory] Level 7 rebuilt, size: 6 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:091 tid=44584 MerkleTree.Memory] Level 8 rebuilt, size: 3 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:091 tid=44584 MerkleTree.Memory] Level 9 rebuilt, size: 2 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:092 tid=44584 MerkleTree.Memory] Level 10 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:093 tid=44584 MerkleTree.Memory] Level 11 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:094 tid=44584 MerkleTree.Memory] Level 12 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:094 tid=44584 MerkleTree.Memory] Level 13 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:095 tid=44584 MerkleTree.Memory] Level 14 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:096 tid=44584 MerkleTree.Memory] Level 15 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:096 tid=44584 MerkleTree.Memory] Level 16 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:097 tid=44584 MerkleTree.Memory] Level 17 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:097 tid=44584 MerkleTree.Memory] Level 18 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:098 tid=44584 MerkleTree.Memory] Level 19 rebuilt, size: 1 (merkle_tree.py:128)
+[I 2026-11-13 19:13:28:098 tid=44584 Tornado] Merkle tree ready (core.py:83)
+[I 2026-11-13 19:13:28:608 tid=30988 EventPoller] 133 blocks behind, latest block number: 9379475 (blockchain.py:238)
+[I 2026-11-13 19:13:30:615 tid=30988 cli] Sepolia@0.1ETH, synced 133 blocks from 9379343 to 9379475, progress: 100.00%, deposits: 1, withdrawals: 1 (cli.py:267)
+[I 2026-11-13 19:13:30:615 tid=30988 EventPoller] Synced to block 9379475 (blockchain.py:317)
+[I 2026-11-13 19:13:30:615 tid=30988 cli] Sepolia@0.1ETH, catch up to the latest blockchain (cli.py:258)
+[I 2026-11-13 19:13:36:408 tid=44584 Tornado] withdraw(to=0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377), proof generated for commitment: 0x13fcdc40f03185c458855157d386bdd7f694e5ea2d2fa727c186927939916c68 (core.py:420)
+[I 2026-11-13 19:13:38:586 tid=44584 Tornado] withdraw(to=0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377) succeed, tx hash: 0x272d8abe36c445defe27b29da0171392e62b1afabd10ccb9633944d2f28d46a6 (core.py:532)
 ```
 
 Some relayers require a higher service fee. The default rate in `config.py` is `1.8%`.
@@ -294,7 +336,7 @@ Some relayers require a higher service fee. The default rate in `config.py` is `
 
 ### Batch Withdraw
 
-Similar to batch deposit, you can withdraw multiple notes to one recipient address at once.  
+Withdraw multiple notes to one recipient address. Wallet withdrawals on the same chain use one transaction; relayer withdrawals are submitted individually.
 ```bash
 # python cli.py --withdraw_batch <notes> <recipient> <key/relayer_url>
 # <notes>          : Multiple tornado note text separated by comma without whitespace
@@ -302,9 +344,9 @@ Similar to batch deposit, you can withdraw multiple notes to one recipient addre
 # <key/relayer_url>: Relayer URL or private key in Hex string, '0x' prefix is optional
 
 > python cli.py --withdraw_batch \
-    sepolia-eth-0.1-6eb32c15b678855085e7ff524b0ecaf89412b92b66c7f5d8d3b5c3991c7e9c-b6a335ef4ee1bd88460a3fc68b67a30908061a3b8b66160ab39e9aec50d54a,sepolia-eth-0.1-0cb9fc8d22b005fe142abcc225d9826adc789b88c379b7668f712cd7e79b95-71903a81f3926a050f8a88b983769083d6f81c7f9ad8d0ef32abbc66ae629c,sepolia-eth-0.1-50cb4336664d12ebdfb3b83887366435008efb8e7ddd4a24cab1e6296a65e7-a8563b6f1074a19e20fe4a8a43d674835606db89265b69366aeaf7efc516f6
-    0xA09CBdDb54c7bD239F80b252d25002001580BafF \
-    0x0f36b1371ac961e318c284985c184fbac8b4c91ed1765343d4088f04252f9a66
+    sepolia-eth-0.1-af8b95026509916ea9609e399b0dfdd46fdd7546100d20964a661355203118-578008204a14ccac34abb919a732b49385e791b991bc05cdaf793bd680c429,sepolia-eth-0.1-dd92f985be129f418f66b5c0564a0ec42d5ec421e9aeb5069b3027b629d2df-958303c9b3e8bb0498ce3c438d7ba06befc7122bd58f1a8edaf9096e072767,sepolia-eth-0.1-2dac958aa3c6f894d3f9d08ac4c3bbf08d9dcf20d29abfcd50cf6688c1cfa5-38c3f61c3bec4c5bba72f90dd1cf54f60f8c9fcf7715e9710eb2c9ec595bed
+    0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377 \
+    0xb5e37ddba901ea782a3d24b5a2cb03db1de7e11ef7c4ff394051567f63985e40
 ```
 
 
@@ -316,9 +358,9 @@ The bigger the number, the more anonymity you get.
 # python cli.py --note_age <note/invoice>
 # <note/invoice>: The private note, or the invoice of the note
 
-> python cli.py --note_age sepolia-eth-0.1-122ec0ef7098492ae61f26695edd4c070ca40ca6b1455ff64843f53ad03780cb
-[I 2025-10-31 00:27:12:515 tid=676076 cli] Since commitment 0x122ec0ef7098492ae61f26695edd4c070ca40ca6b1455ff64843f53ad03780cb (cli.py:732)
-[I 2025-10-31 00:27:12:515 tid=676076 cli] Deposit: 54, Withdraw: 31 (cli.py:733)
+> python cli.py --note_age sepolia-eth-0.1-13fcdc40f03185c458855157d386bdd7f694e5ea2d2fa727c186927939916c68
+[I 2026-11-13 19:31:12:515 tid=676076 cli] Since commitment 0x13fcdc40f03185c458855157d386bdd7f694e5ea2d2fa727c186927939916c68 (cli.py:732)
+[I 2026-11-13 19:31:12:515 tid=676076 cli] Deposit: 54, Withdraw: 31 (cli.py:733)
 ```
 
 
@@ -420,6 +462,10 @@ Last checked: August 26, 2026
 | Sepolia   | ETH    | 0.1     | [0x8C4A04d872a6C1BE37964A21ba3a138525dFF50b](https://sepolia.etherscan.io/address/0x8C4A04d872a6C1BE37964A21ba3a138525dFF50b)      |
 | Sepolia   | ETH    | 1       | [0x8cc930096B4Df705A007c4A039BDFA1320Ed2508](https://sepolia.etherscan.io/address/0x8cc930096B4Df705A007c4A039BDFA1320Ed2508)      |
 | Sepolia   | ETH    | 10      | [0x8D10d506D29Fc62ABb8A290B99F66dB27Fc43585](https://sepolia.etherscan.io/address/0x8D10d506D29Fc62ABb8A290B99F66dB27Fc43585)      |
+| Sepolia   | DAI    | 100     | [0x6921fd1a97441dd603a997ED6DDF388658daf754](https://sepolia.etherscan.io/address/0x6921fd1a97441dd603a997ED6DDF388658daf754)      |
+| Sepolia   | DAI    | 1000    | [0x50a637770F5d161999420F7d70d888DE47207145](https://sepolia.etherscan.io/address/0x50a637770F5d161999420F7d70d888DE47207145)      |
+| Sepolia   | DAI    | 10000   | [0xecD649870407cD43923A816Cc6334a5bdf113621](https://sepolia.etherscan.io/address/0xecD649870407cD43923A816Cc6334a5bdf113621)      |
+| Sepolia   | DAI    | 100000  | [0x73B4BD04bF83206B6e979BE2507098F92EDf4F90](https://sepolia.etherscan.io/address/0x73B4BD04bF83206B6e979BE2507098F92EDf4F90)      |
 
 
 ## Buy me a coffee
@@ -428,4 +474,4 @@ If you like this project 😉☕
 
 EVM Address: 0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377  
 
-![](/assets/0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377.png)
+<img src="./assets/0x0B8c87d9A9Ac16E0a8837C73fDaC7477Ed12e377.png" width="200" alt="Donation QR code">
