@@ -20,7 +20,7 @@ _compile_lock = threading.Lock()
 
 
 def source_files(directory: Path) -> dict[str, dict[str, str]]:
-    sources = {path.name: {'content': path.read_text()} for path in directory.glob('*.sol')}
+    sources = {path.name: {'content': path.read_text()} for path in (directory / 'src').glob('*.sol')}
     vendor = directory / 'vendor/openzeppelin'
     sources.update({
         '@openzeppelin/contracts/' + path.relative_to(vendor).as_posix(): {'content': path.read_text()}

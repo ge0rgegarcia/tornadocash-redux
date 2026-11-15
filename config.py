@@ -89,13 +89,13 @@ TORNADO_PROVING_KEY_PATH: str = os.path.join(os.path.dirname(__file__), 'zk/torn
 
 TORNADO_VERIFICATION_KEY_PATH: str = os.path.join(os.path.dirname(__file__), 'zk/tornado/verification_key.json').replace('\\', '/')
 
-TORNADO_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/tornado.json').replace('\\', '/')
+TORNADO_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'contracts/abi/tornado.json').replace('\\', '/')
 
-TORNADO_PROXY_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/tornado_proxy.json').replace('\\', '/')
+TORNADO_PROXY_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'contracts/abi/tornado_proxy.json').replace('\\', '/')
 
-ERC20_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/erc20.json').replace('\\', '/')
+ERC20_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'contracts/abi/erc20.json').replace('\\', '/')
 
-MULTICALL_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'abi/multicall3.json').replace('\\', '/')
+MULTICALL_ABI_PATH: str = os.path.join(os.path.dirname(__file__), 'contracts/abi/multicall3.json').replace('\\', '/')
 
 BATCH_CONTRACTS_PATH: str = os.path.join(os.path.dirname(__file__), 'contracts').replace('\\', '/')
 

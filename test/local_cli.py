@@ -26,7 +26,7 @@ def main(state: Path) -> None:
     account = key.eth_address()
     recipient = Web3.to_checksum_address('0x' + 'ab' * 20)
     chain.provider.make_request('anvil_setBalance', [account, hex(100 * 10**18)])
-    abi = json.loads((ROOT / 'abi/erc20.json').read_text())
+    abi = json.loads((ROOT / 'contracts/abi/erc20.json').read_text())
     abi += [{'type': 'function', 'name': 'owner', 'inputs': [], 'outputs': [{'type': 'address'}], 'stateMutability': 'view'},
             {'type': 'function', 'name': 'mint', 'inputs': [{'name': 'to', 'type': 'address'},
               {'name': 'amount', 'type': 'uint256'}], 'outputs': [{'type': 'bool'}], 'stateMutability': 'nonpayable'}]

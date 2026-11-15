@@ -51,8 +51,10 @@ COMPILED = {
 
 @pytest.fixture
 def compiled_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source_dir: Path = tmp_path / 'src'
+    source_dir.mkdir()
     for name in ('BatchDepositorBase.sol', 'BatchDepositorUniversal.sol', 'BatchDepositorERC20.sol'):
-        (tmp_path / name).write_text(name)
+        (source_dir / name).write_text(name)
     dependency = tmp_path / 'vendor/openzeppelin/token/ERC20/IERC20.sol'
     dependency.parent.mkdir(parents=True)
     dependency.write_text('IERC20')
@@ -291,8 +293,8 @@ def test_contracts_compile_on_first_use_and_share_the_disk_cache(compiled_contra
     assert cache['contracts'] == ARTIFACTS
 
 
-@pytest.mark.parametrize('name', ['BatchDepositorBase.sol', 'BatchDepositorUniversal.sol',
-                                  'BatchDepositorERC20.sol', 'vendor/openzeppelin/token/ERC20/IERC20.sol'])
+@pytest.mark.parametrize('name', ['src/BatchDepositorBase.sol', 'src/BatchDepositorUniversal.sol',
+                                  'src/BatchDepositorERC20.sol', 'vendor/openzeppelin/token/ERC20/IERC20.sol'])
 def test_contract_source_changes_invalidate_the_cache(compiled_contracts, name: str) -> None:
     run, directory = compiled_contracts
     compiler.batch_depositor_artifact(directory, False)

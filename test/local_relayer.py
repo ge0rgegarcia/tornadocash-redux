@@ -1,11 +1,10 @@
-import argparse
-import json
+from hexbytes import HexBytes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import threading
-
-from hexbytes import HexBytes
 from web3 import Web3
+import argparse
+import json
+import threading
 
 
 def create_server(deployment: dict, port: int = 18081) -> ThreadingHTTPServer:
@@ -16,7 +15,7 @@ def create_server(deployment: dict, port: int = 18081) -> ThreadingHTTPServer:
     if chain_id != 31337:
         raise ValueError('The local RPC is not the disposable Anvil chain.')
     account = web3.eth.accounts[0]
-    abi = json.loads((Path(__file__).parents[1] / 'abi/tornado.json').read_text())
+    abi = json.loads((Path(__file__).parents[1] / 'contracts/abi/tornado.json').read_text())
     instances = {symbol: {'instanceAddress': pools} for symbol, pools in deployment['pools'].items()}
     status = {'netId': chain_id, 'rewardAccount': account, 'instances': instances,
               'ethPrices': {'dai': str(5 * 10**14)}}

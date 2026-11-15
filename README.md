@@ -207,7 +207,7 @@ The `note` has full access to the deposited funds, please keep it private and se
 ### Batch Deposit
 
 Deposits on the same chain are combined into one transaction, including native and ERC20 tokens. Each chain uses a separate transaction.
-For an ERC20 batch, deploy [BatchDepositorERC20](contracts/BatchDepositorERC20.sol) or [BatchDepositorUniversal](contracts/BatchDepositorUniversal.sol) according to the tokens in the batch, approve each token to its deployed address, then call it to make all deposits.
+For an ERC20 batch, deploy [BatchDepositorERC20](contracts/src/BatchDepositorERC20.sol) or [BatchDepositorUniversal](contracts/src/BatchDepositorUniversal.sol) according to the tokens in the batch, approve each token to its deployed address, then call it to make all deposits.
 The Python client compiles the contracts with native `solc 0.8.30` on first use, downloading it if needed, and caches the bytecode locally. Node.js is not required.
 The deployment sends no native tokens. Native tokens in a mixed batch are sent with the final deposit call. All notes are backed up before submission.
 

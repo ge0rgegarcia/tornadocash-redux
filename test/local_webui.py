@@ -38,9 +38,7 @@ def configure(state: Path) -> dict:
                'pools': {symbol: metadata[symbol]['deployed_address'] for symbol in ('eth', 'dai')}}
     (state / 'local-chain.json').write_text(json.dumps(fixture, indent=2) + '\n')
     contracts = state / 'contracts'
-    contracts.mkdir(exist_ok=True)
-    for source in (ROOT / 'contracts').glob('*.sol'):
-        shutil.copyfile(source, contracts / source.name)
+    shutil.copytree(ROOT / 'contracts/src', contracts / 'src', dirs_exist_ok=True)
     shutil.copytree(ROOT / 'contracts/vendor', contracts / 'vendor', dirs_exist_ok=True)
     for symbol, units in {'eth': ('0.1', '1'), 'dai': ('100', '1000')}.items():
         for unit in units:
