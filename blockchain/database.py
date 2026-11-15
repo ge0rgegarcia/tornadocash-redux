@@ -1,12 +1,12 @@
-import os
-import sqlite3
-import threading
 from enum import Enum
 from hexbytes import HexBytes
 from typing import Any
+import os
+import sqlite3
+import threading
 
 from .sync import EventDeposit, EventWithdraw
-from util import log, helper_func
+from util import helper_func, log
 from util.executor import Job, Queue
 from util.mytype import ChainID, Metadata, Symbol, TornadoUnit
 import config
@@ -91,8 +91,8 @@ class Interface(object):
     @param  withdrawals     List of withdraw events, existing events (by tx_hash and nullifier_hash) will be ignored
     @return True if succeed, False otherwise
     '''
-    def add_synchronized(self, block_number: int, deposits: list[EventDeposit], withdrawals: list[
-        EventWithdraw]) -> bool:
+    def add_synchronized(self, block_number: int, deposits: list[EventDeposit],
+                         withdrawals: list[EventWithdraw]) -> bool:
         raise NotImplementedError
 
     '''
@@ -219,8 +219,8 @@ class SQLite(Interface):
             rows: list[tuple[int, int]] | None = self._query('SELECT (SELECT COUNT(*) FROM t_event_deposit), (SELECT COUNT(*) FROM t_event_withdraw);')
         return tuple(rows[0]) if rows else None
 
-    def add_synchronized(self, block_number: int, deposits: list[EventDeposit], withdrawals: list[
-        EventWithdraw]) -> bool:
+    def add_synchronized(self, block_number: int, deposits: list[EventDeposit],
+                         withdrawals: list[EventWithdraw]) -> bool:
         sql: list[str] = [
             f'UPDATE t_info SET latest_blk_num = {block_number} WHERE latest_blk_num < {block_number};',
             f'UPDATE t_info SET unspent_count = unspent_count + {len(deposits)} - {len(withdrawals)};',
@@ -271,20 +271,20 @@ class SQLite(Interface):
             log.error(self.TAG, f'Database not opened')
             return False
 
-        succeed: bool = True
+        succeed: bool = False
+
         def _() -> None:
             nonlocal succeed
             try:
                 for q in sql:
                     self.cursor.execute(q)
                 self.connection.commit()
+                succeed = True
             except Exception as e:
                 log.error(self.TAG, f'Insert exception, sql: {sql}, error: {e}')
                 self.connection.rollback()
-                succeed = False
-        self.taskq.run_sync(Job('Insert', _))
 
-        return succeed
+        return self.taskq.run_sync(Job('Insert', _)) and succeed
 
 
 def create(backend: Backend) -> Interface:

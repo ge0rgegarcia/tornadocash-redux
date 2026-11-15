@@ -1,12 +1,11 @@
-from pathlib import Path
-
 from hexbytes import HexBytes
+from pathlib import Path
 import pytest
 
-import config
-from blockchain.sync import EventDeposit, EventWithdraw
 from blockchain.database import SQLite
+from blockchain.sync import EventDeposit, EventWithdraw
 from util.mytype import ChainID, Symbol, TornadoUnit
+import config
 
 
 def test_event_counts_use_persisted_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -23,5 +22,23 @@ def test_event_counts_use_persisted_history(tmp_path: Path, monkeypatch: pytest.
         # Re-reading a block must not inflate the UI's historical totals.
         assert db.add_synchronized(2, [deposit], [withdrawal])
         assert db.get_event_counts() == (1, 1)
+    finally:
+        db.close()
+
+
+def test_sync_rejects_a_refused_write_without_advancing_cursor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    chain : ChainID     = ChainID.SEPOLIA
+    symbol: Symbol      = Symbol.ETH
+    unit  : TornadoUnit = TornadoUnit.UNIT_0_1
+    monkeypatch.setitem(config.DATABASE_PATHS[chain][symbol], unit, str(tmp_path / 'events.sqlite'))
+    db: SQLite = SQLite()
+    try:
+        assert db.open(chain, symbol, unit)
+        checkpoint: int | None = db.get_latest_block_number()
+        assert checkpoint is not None
+        with monkeypatch.context() as refused:
+            refused.setattr(db.taskq, 'run_sync', lambda job: False)
+            assert not db.add_synchronized(checkpoint + 1, [], [])
+        assert db.get_latest_block_number() == checkpoint
     finally:
         db.close()
