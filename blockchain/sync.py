@@ -1,17 +1,20 @@
-import threading
-import time
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
+from time import monotonic
+from typing import Callable, TypeAlias, TypeVar
 from web3 import Web3
 from web3.types import LogReceipt, Wei
+import threading
+import time
 
-from util import log, helper_func
 from . import rpc
-from util.mytype import ChainID, Second, chain_to_string
+from util import helper_func, log
 from util.helper_func import upper_first_char
+from util.mytype import ChainID, chain_to_string, Metadata, Second
 import config
 
 
@@ -138,7 +141,200 @@ class EventWithdraw(LogEvent):
         return Web3.keccak(text='Withdrawal(address,bytes32,address,uint256)')
 
 
-class EventPoller(object):
+Topics    : TypeAlias = tuple[HexBytes, ...]
+Logs      : TypeAlias = list[LogReceipt]
+LogKey    : TypeAlias = tuple[object, int, int, Topics]
+LogRequest: TypeAlias = tuple[frozenset[ChecksumAddress], int, int, Topics]
+
+Result = TypeVar('Result')
+
+
+@dataclass
+class _Head:
+    number    : int
+    checked_at: float
+    expires_at: float
+    logs      : dict[LogKey, Logs] = field(default_factory=dict)
+
+
+@dataclass
+class _Pool:
+    next_block  : int
+    head        : _Head | None = None
+    registration: object       = field(default_factory=object)
+
+
+class ChainReader:
+    """Share block and log reads across pools on one chain."""
+
+    def __init__(self, connection: rpc.Interface, *, head_max_age: float = 60,
+                 expected_chain_id: int | None = None) -> None:
+        self.connection        : rpc.Interface                = connection
+        self.head_max_age      : float                        = head_max_age
+        self._expected_chain_id: int | None                   = expected_chain_id
+        self._pools            : dict[ChecksumAddress, _Pool] = {}
+        self._head             : _Head | None                 = None
+
+        self._pools_lock  : threading.Lock = threading.Lock()
+        self._head_lock   : threading.Lock = threading.Lock()
+        self._logs_lock   : threading.Lock = threading.Lock()
+        self._request_lock: threading.Lock = threading.Lock()
+
+        self._failed_requests: dict[LogRequest | None, tuple[float, rpc.Error]] = {}
+
+    def register(self, contract: ChecksumAddress, start: int) -> None:
+        with self._pools_lock:
+            self._pools[contract] = _Pool(start)
+
+    def unregister(self, contract: ChecksumAddress) -> None:
+        with self._pools_lock:
+            self._pools.pop(contract, None)
+
+    def persisted(self, contract: ChecksumAddress, next_block: int) -> None:
+        with self._pools_lock:
+            self._pools[contract].next_block = next_block
+
+    def latest_block_number(self, contract: ChecksumAddress, refresh: bool = False) -> int | rpc.Error:
+        # A fresh head completed while this caller was waiting satisfies its refresh.
+        observed: _Head | None = self._head
+        with self._head_lock:
+            head: _Head | None = self._head
+            with self._request_lock:
+                error: rpc.Error | None = self._recent_error(None)
+                if error is not None:
+                    return error
+                with self._pools_lock:
+                    pool   : _Pool = self._pools[contract]
+                    minimum: int   = max(0, pool.next_block - 1)
+                    if (head is not None and head.number >= minimum and monotonic() < head.expires_at
+                            and head is not pool.head and (not refresh or head is not observed)):
+                        pool.head = head
+                        return head.number
+
+            def read_head() -> int | rpc.Error:
+                if self._expected_chain_id is not None:
+                    remote_chain: int | rpc.Error = self.connection.remote_chain_id()
+                    if rpc.is_error(remote_chain):
+                        return remote_chain
+                    if remote_chain != self._expected_chain_id:
+                        return rpc.Error(rpc.ErrorCode.RPC_CHAIN_MISMATCH, (),
+                                         f'RPC reports chain ID {remote_chain}, expected {self._expected_chain_id}.')
+                    self._expected_chain_id = None
+                result: int | rpc.Error | None = self.connection.latest_block_number()
+                if rpc.is_error(result):
+                    return result
+                if type(result) is not int or result < 0:
+                    return rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC head must be a non-negative integer.')
+                return result
+
+            result: int | rpc.Error = self._request(None, read_head)
+            if rpc.is_error(result):
+                return result
+            head = _Head(result, time.time(), monotonic() + self.head_max_age)
+            with self._pools_lock:
+                self._head = head
+                if head.number < minimum:
+                    return rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC head is behind the pool sync cursor.')
+                pool.head = head
+            return head.number
+
+    def head_checked_at(self, contract: ChecksumAddress) -> float:
+        with self._pools_lock:
+            return self._pools[contract].head.checked_at
+
+    def get_logs(self, contract: ChecksumAddress, start: int, end: int, topics: Topics) -> Logs | rpc.Error:
+        with self._pools_lock:
+            pool: _Pool        = self._pools[contract]
+            head: _Head | None = pool.head
+        if head is None or end != head.number:
+            result: dict[str, Logs] | rpc.Error = self._read_pools([contract], start, end, topics)
+            return result if rpc.is_error(result) else result[contract.lower()]
+
+        # Share the last range of a round. Historical ranges can progress independently.
+        with self._logs_lock:
+            key: LogKey = (pool.registration, start, end, topics)
+            if key in head.logs:
+                return head.logs.pop(key)
+            peers: list[tuple[ChecksumAddress, object]] = []
+            with self._pools_lock:
+                if head is self._head:
+                    peers = [
+                        (address, peer.registration)
+                        for address, peer in self._pools.items()
+                        if address != contract and peer.next_block == start
+                        and (peer.registration, start, end, topics) not in head.logs
+                    ]
+            members: list[tuple[ChecksumAddress, object]] = [(contract, pool.registration), *peers]
+            result = self._read_pools([address for address, _ in members], start, end, topics)
+            if rpc.is_error(result):
+                return result
+            for address, registration in members[1:]:
+                head.logs[registration, start, end, topics] = result[address.lower()]
+            return result[contract.lower()]
+
+    def _read_pools(self, addresses: list[ChecksumAddress], start: int, end: int,
+                    topics: Topics) -> dict[str, Logs] | rpc.Error:
+        address_filter: rpc.LogAddresses = addresses[0] if len(addresses) == 1 else addresses
+
+        def read_logs() -> dict[str, Logs] | rpc.Error:
+            result: Logs | rpc.Error | None = self.connection.log_receipt(address_filter, start, end, [list(topics)])
+            if rpc.is_error(result):
+                return result
+            if not isinstance(result, list):
+                return rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC did not return a list of logs.')
+
+            by_address  : dict[str, Logs]                   = {address.lower(): [] for address in addresses}
+            block_hashes: dict[int, bytes]                  = {}
+            seen        : dict[tuple[int, int], LogReceipt] = {}
+            for event in result:
+                if not isinstance(event, Mapping):
+                    return rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC returned a malformed log.')
+                address     : str | None                = event.get('address')
+                block       : int | None                = event.get('blockNumber')
+                index       : int | None                = event.get('logIndex')
+                event_topics: Sequence[HexBytes] | None = event.get('topics')
+                block_hash  : bytes | None              = event.get('blockHash')
+                if (not isinstance(address, str) or address.lower() not in by_address
+                        or type(block) is not int or not start <= block <= end
+                        or type(index) is not int or index < 0
+                        or not isinstance(event_topics, (list, tuple)) or not event_topics or event_topics[0] not in topics
+                        or not isinstance(block_hash, bytes) or len(block_hash) != 32
+                        or event.get('removed', False) is not False):
+                    return rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC returned a log outside its filter.')
+                key: tuple[int, int] = (block, index)
+                if block_hashes.setdefault(block, block_hash) != block_hash or (key in seen and seen[key] != event):
+                    return rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'Conflicting logs for the same block.')
+                if key not in seen:
+                    seen[key] = event
+                    by_address[address.lower()].append(event)
+            for logs in by_address.values():
+                logs.sort(key=lambda event: (event['blockNumber'], event['logIndex']))
+            return by_address
+
+        request: LogRequest = (frozenset(addresses), start, end, topics)
+        return self._request(request, read_logs)
+
+    def _recent_error(self, request: LogRequest | None) -> rpc.Error | None:
+        failure: tuple[float, rpc.Error] | None = self._failed_requests.get(request)
+        return failure[1] if failure is not None and monotonic() < failure[0] else None
+
+    def _request(self, request: LogRequest | None, action: Callable[[], Result | rpc.Error]) -> Result | rpc.Error:
+        with self._request_lock:
+            error: rpc.Error | None = self._recent_error(request)
+            if error is not None:
+                return error
+            result: Result | rpc.Error = action()
+            now   : float              = monotonic()
+            self._failed_requests = {
+                key: failure for key, failure in self._failed_requests.items() if failure[0] > now
+            }
+            if rpc.is_error(result):
+                self._failed_requests[request] = (now + config.RPC_RETRY_INTERVAL_SEC, result)
+            return result
+
+
+class PoolPoller(object):
+    """Track and advance the persisted synchronization of one pool."""
 
     class Activity(Enum):
         IDLE            = 'idle'
@@ -161,29 +357,31 @@ class EventPoller(object):
             """Called when the latest block number is updated."""
             pass
 
-    def __init__(self, chain: ChainID, connection: rpc.Interface | None = None, poll_interval: float | None = None) -> None:
-        self.tag           : str                       = f'{__class__.__name__}@{upper_first_char(chain_to_string(chain))}'
-        self.off           : bool                      = True
-        self.chain         : ChainID                   = chain
-        self.connection    : rpc.Interface | None      = connection  # If True, the RPC connection is managed outside
-        self.external      : bool                      = connection is not None
-        self.meta          : helper_func.Metadata             = helper_func.load_metadata()[chain]
-        self.contract      : ChecksumAddress | None    = None
-        self.events        : list[LogEvent]            = [EventDeposit(), EventWithdraw()]
-        self.current       : int                       = 0
-        self.cond          : threading.Condition       = threading.Condition()
-        self.worker        : threading.Thread | None   = None
-        self.handlers      : list[EventPoller.Handler] = []
-        self.poll_interval : float                     = config.BLOCKCHAIN_LOG_EVENT_POLL_INTERVAL_SEC if poll_interval is None else poll_interval
-        self.start_block   : int                       = 0
-        self.latest_block  : int | None                = None
-        self.last_check_sec: float | None              = None
-        self.error         : str | None                = None
-        self.activity      : EventPoller.Activity      = EventPoller.Activity.IDLE
-        self.caught_up     : bool                      = False
-        self.refresh_needed: bool                      = False
-        self.deposits      : int                       = 0
-        self.withdrawals   : int                       = 0
+    def __init__(self, chain: ChainID, connection: rpc.Interface | None = None, poll_interval: float | None = None,
+                 reader: ChainReader | None = None) -> None:
+        self.tag           : str                      = f'{__class__.__name__}@{upper_first_char(chain_to_string(chain))}'
+        self.off           : bool                     = True
+        self.chain         : ChainID                  = chain
+        self.connection    : rpc.Interface | None     = connection  # If True, the RPC connection is managed outside
+        self.external      : bool                     = connection is not None
+        self.reader        : ChainReader | None       = reader
+        self.meta          : Metadata                 = helper_func.load_metadata()[chain]
+        self.contract      : ChecksumAddress | None   = None
+        self.events        : list[LogEvent]           = [EventDeposit(), EventWithdraw()]
+        self.current       : int                      = 0
+        self.cond          : threading.Condition      = threading.Condition()
+        self.worker        : threading.Thread | None  = None
+        self.handlers      : list[PoolPoller.Handler] = []
+        self.poll_interval : float                    = config.BLOCKCHAIN_LOG_EVENT_POLL_INTERVAL_SEC if poll_interval is None else poll_interval
+        self.start_block   : int                      = 0
+        self.latest_block  : int | None               = None
+        self.last_check_sec: float | None             = None
+        self.error         : str | None               = None
+        self.activity      : PoolPoller.Activity      = PoolPoller.Activity.IDLE
+        self.caught_up     : bool                     = False
+        self.refresh_needed: bool                     = False
+        self.deposits      : int                      = 0
+        self.withdrawals   : int                      = 0
         if self.connection is None:
             self.connection = rpc.Connection(self.chain, config.RPC_URLS[self.chain])
 
@@ -192,7 +390,8 @@ class EventPoller(object):
     @param contract     Contract addresses
     @param start_block  Start from which block number (inclusive)
     '''
-    def start(self, contract: ChecksumAddress, start_block: int) -> bool:
+    def start(self, contract: ChecksumAddress, start_block: int,
+              *, start_gate: threading.Event | None = None) -> bool:
         if not self.off:
             log.warn(self.tag, 'start() already started')
             return False
@@ -205,18 +404,35 @@ class EventPoller(object):
         elif not self.connection.started():
             log.error(self.tag, 'The external RPC connection is not started')
             return False
-        with self.cond:
-            self.off            = False
-            self.contract       = contract
-            self.current        = self.start_block = start_block
-            self.latest_block   = self.last_check_sec = self.error = None
-            self.caught_up      = False
-            self.refresh_needed = False
-            self.activity       = EventPoller.Activity.FETCHING_HEAD
-            self.deposits       = self.withdrawals = 0
-            self.cond.notify_all()
-        self.worker = threading.Thread(target=self._loop)
-        self.worker.start()
+        registered: bool = False
+        try:
+            if self.reader is not None:
+                self.reader.register(contract, start_block)
+                registered = True
+            with self.cond:
+                self.off            = False
+                self.contract       = contract
+                self.current        = self.start_block = start_block
+                self.latest_block   = self.last_check_sec = self.error = None
+                self.caught_up      = False
+                self.refresh_needed = False
+                self.activity       = PoolPoller.Activity.FETCHING_HEAD
+                self.deposits       = self.withdrawals = 0
+                self.cond.notify_all()
+            self.worker = threading.Thread(target=self._loop, args=(start_gate,))
+            self.worker.start()
+        except Exception:
+            if registered:
+                self.reader.unregister(contract)
+            with self.cond:
+                self.off      = True
+                self.activity = PoolPoller.Activity.IDLE
+                self.contract = None
+                self.worker   = None
+                self.cond.notify_all()
+            if not self.external:
+                self.connection.stop()
+            raise
         log.debug(self.tag, f'start(contract={contract}, start_block={start_block}, events={[e.event_name() for e in self.events]})')
         return True
 
@@ -250,10 +466,10 @@ class EventPoller(object):
                 fresh     : bool         = last_check is not None and time.time() - last_check <= 60
                 if sync['synchronized'] and fresh and not refresh:
                     return True
-                if (refresh or (not fresh and self.activity != EventPoller.Activity.FETCHING_HEAD)) and not self.refresh_needed:
+                if (refresh or (not fresh and self.activity != PoolPoller.Activity.FETCHING_HEAD)) and not self.refresh_needed:
                     self.refresh_needed = True
                     self.caught_up      = False
-                    if sync['synchronized'] and self.activity == EventPoller.Activity.IDLE:
+                    if sync['synchronized'] and self.activity == PoolPoller.Activity.IDLE:
                         self.cond.notify_all()
                 refresh = False
                 self.cond.wait(0.5)
@@ -299,8 +515,11 @@ class EventPoller(object):
         with self.cond:
             self.handlers.clear()
 
-    def _loop(self) -> None:
+    def _loop(self, start_gate: threading.Event | None = None) -> None:
         try:
+            if start_gate is not None:
+                while not self.off and not start_gate.wait(config.RPC_RETRY_INTERVAL_SEC):
+                    pass
             self._poll()
         except Exception:
             with self.cond:
@@ -311,37 +530,54 @@ class EventPoller(object):
         finally:
             with self.cond:
                 self.off      = True
-                self.activity = EventPoller.Activity.IDLE
+                self.activity = PoolPoller.Activity.IDLE
                 self.cond.notify_all()
-            if not self.external and self.connection.started():
-                self.connection.stop()
+            try:
+                if self.reader is not None:
+                    self.reader.unregister(ChecksumAddress(self.contract))
+            finally:
+                if not self.external and self.connection.started():
+                    self.connection.stop()
+
+    def _wait_to_retry(self, error: rpc.Error, operation: str) -> None:
+        with self.cond:
+            self.error    = error.code.value
+            self.activity = PoolPoller.Activity.RETRY_WAIT
+            self.cond.notify_all()
+        log.error(self.tag, f'Failed to {operation}, RPC error: {error.code.value}')
+        helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
 
     def _poll(self) -> None:
-        first_loop: bool = True
+        first_loop    : bool               = True
+        contract      : ChecksumAddress    = ChecksumAddress(self.contract)
+        reader        : ChainReader | None = self.reader
+        topics        : Topics             = tuple(event.event_hash() for event in self.events)
+        topic_groups  : list[Topics]       = [topics] if reader is not None else [(topic,) for topic in topics]
+        deposit_topic : HexBytes           = EventDeposit.event_hash()
+        withdraw_topic: HexBytes           = EventWithdraw.event_hash()
         while not self.off:
-            latest: int | rpc.Error = 0
+            latest : int | rpc.Error | None = 0
+            refresh: bool                   = False
             # Get latest block number
             while not self.off:
                 with self.cond:
-                    self.activity       = EventPoller.Activity.FETCHING_HEAD
+                    self.activity       = PoolPoller.Activity.FETCHING_HEAD
+                    refresh             = refresh or self.refresh_needed
                     self.refresh_needed = False
-                latest = self.connection.latest_block_number()
+                latest = reader.latest_block_number(contract, refresh) if reader is not None else self.connection.latest_block_number()
                 if not rpc.is_error(latest):
-                    break
-                with self.cond:
-                    self.error    = latest.code.value
-                    self.activity = EventPoller.Activity.RETRY_WAIT
-                    self.cond.notify_all()
-                log.error(self.tag, f'Failed to get latest block number, RPC error: {self.error}')
-                log.info(self.tag, f'Wait {config.RPC_RETRY_INTERVAL_SEC}s and retry')
-                helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                    if type(latest) is int and latest >= 0:
+                        break
+                    latest = rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC head must be a non-negative integer.')
+                self._wait_to_retry(latest, 'get latest block number')
             if self.off:
                 break
+            checked_at: float = reader.head_checked_at(contract) if reader is not None else time.time()
             with self.cond:
                 self.latest_block   = latest
-                self.last_check_sec = time.time()
+                self.last_check_sec = checked_at
                 self.error          = None
-                self.activity       = EventPoller.Activity.IDLE
+                self.activity       = PoolPoller.Activity.IDLE
                 self.cond.notify_all()
             count_block: int = max(0, latest - self.current + 1)
 
@@ -356,7 +592,8 @@ class EventPoller(object):
             batch_size : int = config.BLOCKCHAIN_LOG_EVENT_POLL_BLOCKS_PER_REQUEST[self.chain]
             batch_count: int = count_block // batch_size
             residual   : int = count_block  % batch_size
-            chunks     : list[tuple[int, int]] = [(self.current + i * batch_size, self.current + (i + 1) * batch_size - 1) for i in range(batch_count)]
+
+            chunks: list[tuple[int, int]] = [(self.current + i * batch_size, self.current + (i + 1) * batch_size - 1) for i in range(batch_count)]
             if residual > 0:
                 chunks.append((self.current + batch_count * batch_size, self.current + batch_count * batch_size + residual - 1))
 
@@ -365,46 +602,50 @@ class EventPoller(object):
             for chunk in chunks:
                 deposits      : list[EventDeposit]  = []
                 withdrawals   : list[EventWithdraw] = []
-                count_deposit : int = 0
-                count_withdraw: int = 0
+                count_deposit : int                 = 0
+                count_withdraw: int                 = 0
                 if self.off:
                     break_early = True
                     break
                 # Get event logs
                 event_logs: list[LogReceipt] = []
-                for expected in self.events:
-                    with self.cond:
-                        self.activity = EventPoller.Activity.FETCHING_EVENTS
-                    result: list[LogReceipt] | rpc.Error = self.connection.log_receipt(ChecksumAddress(self.contract), chunk[0], chunk[1], [expected.event_hash()])
+                for group in topic_groups:
                     while not self.off:
-                        if not rpc.is_error(result):
+                        with self.cond:
+                            self.activity = PoolPoller.Activity.FETCHING_EVENTS
+                        result: Logs | rpc.Error | None
+                        if reader is not None:
+                            result = reader.get_logs(contract, chunk[0], chunk[1], group)
+                        else:
+                            result = self.connection.log_receipt(contract, chunk[0], chunk[1], list(group))
+                        if isinstance(result, list):
+                            with self.cond:
+                                self.error    = None
+                                self.activity = PoolPoller.Activity.IDLE
+                                self.cond.notify_all()
+                            event_logs.extend(result)
                             break
-                        with self.cond:
-                            self.error    = result.code.value
-                            self.activity = EventPoller.Activity.RETRY_WAIT
-                            self.cond.notify_all()
-                        log.error(self.tag, f'Failed to get logs for event {expected.event_hash().to_0x_hex()}, RPC error: {self.error}')
-                        log.info(self.tag, f'Wait {config.RPC_RETRY_INTERVAL_SEC}s and retry')
-                        helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
-                        with self.cond:
-                            self.activity = EventPoller.Activity.FETCHING_EVENTS
-                        result = self.connection.log_receipt(ChecksumAddress(self.contract), chunk[0], chunk[1], [expected.event_hash()])
-                    if not rpc.is_error(result):
-                        with self.cond:
-                            self.error    = None
-                            self.activity = EventPoller.Activity.IDLE
-                            self.cond.notify_all()
-                        event_logs.extend(result if result is not None else [])
+                        if not rpc.is_error(result):
+                            result = rpc.Error(rpc.ErrorCode.RPC_INVALID_RESPONSE, (), 'RPC did not return a list of logs.')
+                        self._wait_to_retry(result, 'get event logs')
                     if self.off:
                         break
-                    helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                    if reader is None:
+                        helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
                 if self.off:
                     break_early = True
                     break
 
                 # Process event logs
                 for event in event_logs:
-                    if EventDeposit.event_hash() == event['topics'][0]:
+                    topics_in_log: Sequence[HexBytes] = event['topics']
+                    data         : HexBytes           = event['data']
+                    if (len(topics_in_log) != 2 or any(len(topic) != 32 for topic in topics_in_log)
+                            or event.get('removed', False)
+                            or not chunk[0] <= event['blockNumber'] <= chunk[1]
+                            or len(event['transactionHash']) != 32):
+                        raise ValueError('Invalid deposit or withdrawal event.')
+                    if deposit_topic == topics_in_log[0] and len(data) == 64:
                         deposits.append(EventDeposit(
                             int.from_bytes(event['data'][32:64], byteorder='big'),  # timestamp
                             event['blockNumber'],                                   # blk_num
@@ -413,7 +654,7 @@ class EventPoller(object):
                             int.from_bytes(event['data'][:32], byteorder='big'),    # leaf_index
                         ))
                         count_deposit += 1
-                    elif EventWithdraw.event_hash() == event['topics'][0]:
+                    elif withdraw_topic == topics_in_log[0] and len(data) == 96:
                         withdrawals.append(EventWithdraw(
                             event['blockNumber'],                                        # blk_num
                             event['transactionHash'],                                    # tx_hash
@@ -422,9 +663,13 @@ class EventPoller(object):
                             Wei(int.from_bytes(event['data'][64:96], byteorder='big')),  # fee
                         ))
                         count_withdraw += 1
+                    else:
+                        raise ValueError('Invalid deposit or withdrawal event.')
 
-                # Prevent reach the rate limit
-                helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                deposits.sort(key=lambda event: event.leaf_index)
+                # Shared RPC reads are serialized across the chain.
+                if reader is None:
+                    helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
 
                 # Log and notify
                 log.debug(self.tag, f'Polled {chunk[1] - chunk[0] + 1} blocks, from {chunk[0]} to {chunk[1]}, '
@@ -432,15 +677,17 @@ class EventPoller(object):
 
                 # Callback and update
                 with self.cond:
-                    self.activity = EventPoller.Activity.PERSISTING
+                    self.activity = PoolPoller.Activity.PERSISTING
                 for h in self.handlers:
                     h.on_sync(chunk[0], chunk[1], deposits, withdrawals)
                 with self.cond:
-                    self.current = chunk[1] + 1
+                    self.current      = chunk[1] + 1
                     self.deposits    += count_deposit
                     self.withdrawals += count_withdraw
-                    self.activity = EventPoller.Activity.IDLE
+                    self.activity     = PoolPoller.Activity.IDLE
                     self.cond.notify_all()
+                if reader is not None:
+                    reader.persisted(contract, chunk[1] + 1)
             if not break_early:
                 # Notify latest block number
                 for h in self.handlers:
@@ -454,7 +701,7 @@ class EventPoller(object):
                 with self.cond:
                     self.caught_up = not self.refresh_needed
                     self.error     = None
-                    self.activity  = EventPoller.Activity.IDLE
+                    self.activity  = PoolPoller.Activity.IDLE
                     self.cond.notify_all()
                 # Sleep interval if no new block
                 with self.cond:

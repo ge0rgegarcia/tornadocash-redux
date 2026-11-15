@@ -1,23 +1,23 @@
-import threading
-from typing import Callable
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
+from typing import Callable
 from web3 import Web3
 from web3.contract import Contract
-from web3.types import Nonce, Wei, TxParams
+from web3.types import Nonce, TxParams, Wei
+import threading
 
-from blockchain import database, rpc
-from util import log, helper_func
-from zk import merkle_tree
 from . import relayer, wallet
-from blockchain.sync import EventPoller, EventDeposit, EventWithdraw
-from util.mytype import ChainID, CircuitInput, Key, MerkleProof, Metadata, Note, Second, Symbol, TornadoUnit, SymbolType
+from blockchain import database, rpc
+from blockchain.sync import ChainReader, EventDeposit, EventWithdraw, PoolPoller
+from util import helper_func, log
 from util.helper_func import get_symbol_type, unit_to_wei, wait
+from util.mytype import ChainID, CircuitInput, Key, MerkleProof, Metadata, Note, Second, Symbol, SymbolType, TornadoUnit
+from zk import merkle_tree
 import config
 import zk
 
 
-class Tornado(EventPoller.Handler):
+class Tornado(PoolPoller.Handler):
 
     class Handler(object):
 
@@ -37,7 +37,8 @@ class Tornado(EventPoller.Handler):
             """Called before an operation starts its next step."""
             pass
 
-    def __init__(self, chain: ChainID, symbol: Symbol, unit: TornadoUnit, connection: rpc.Interface | None = None):
+    def __init__(self, chain: ChainID, symbol: Symbol, unit: TornadoUnit, connection: rpc.Interface | None = None,
+                 *, reader: ChainReader | None = None) -> None:
         self.tag                : str                          = f'{__class__.__name__}'
         self.chain              : ChainID                      = chain
         self.symbol             : Symbol                       = symbol
@@ -53,7 +54,6 @@ class Tornado(EventPoller.Handler):
         self.proxy_contract     : Contract | rpc.Error | None  = None
         self.deployment_contract: Contract | rpc.Error | None  = None
         self.token_contract     : Contract | rpc.Error | None  = None
-        self.poller             : EventPoller                  = EventPoller(chain)
         self.catchup            : bool                         = False
         self.last_update_sec    : Second | None                = None
         self.tree               : merkle_tree.Interface | None = None
@@ -70,6 +70,9 @@ class Tornado(EventPoller.Handler):
             self.connection = rpc.Connection(self.chain, config.RPC_URLS[self.chain])
             if not self.connection.start():
                 raise RuntimeError(f'Failed to start RPC connection for {self.chain}')
+        if reader is None:
+            reader = ChainReader(self.connection, expected_chain_id=self.chain.value)
+        self.poller             : PoolPoller                   = PoolPoller(self.chain, self.connection, reader=reader)
         self.proxy_contract      = self.connection.get_contract(address=self.proxy_address, abi=proxy_abi)
         self.deployment_contract = self.connection.get_contract(self.deployment_address, deployment_abi)
         self.token_contract      = self.connection.get_contract(self.meta.token_address[self.symbol], erc20_abi) if SymbolType.ERC20 == get_symbol_type(self.symbol) else None
@@ -482,7 +485,7 @@ class Tornado(EventPoller.Handler):
         log.info(self.tag, f'Withdraw {self.unit.value} {self.symbol.value.upper()} succeed, tx hash: {tx_hash.to_0x_hex()}')
         return tx_hash
 
-    def start_sync(self) -> bool:
+    def start_sync(self, *, start_gate: threading.Event | None = None) -> bool:
         contract    : ChecksumAddress = self.meta.deployment[self.symbol][self.unit][0]
         latest_block: int | None      = self.db.get_latest_block_number()
         if latest_block is None:
@@ -490,7 +493,7 @@ class Tornado(EventPoller.Handler):
             return False
         if latest_block > self.meta.deployment[self.symbol][self.unit][1]:
             latest_block += 1
-        return self.poller.start(contract, latest_block)
+        return self.poller.start(contract, latest_block, start_gate=start_gate)
 
     def stop_sync(self) -> None:
         self.poller.stop()

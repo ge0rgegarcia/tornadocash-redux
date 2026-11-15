@@ -1,21 +1,23 @@
-import argparse
-import qrcode
-import os
-import threading
-import traceback
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
-from time import monotonic
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
+from time import monotonic, sleep
 from web3 import Web3
-from web3.types import TxReceipt
+from web3.types import TxParams, TxReceipt
+import argparse
+import os
+import qrcode
+import threading
+import traceback
 
-from util import log, helper_func
 from blockchain import rpc
+from blockchain.sync import ChainReader, EventDeposit, EventWithdraw
 from core import batch_tx
-from blockchain.sync import EventDeposit, EventWithdraw
 from core.pool import Tornado
-from util.mytype import ChainID, Key, Metadata, Note, Second, Symbol, TornadoUnit, chain_to_string, string_to_chain
+from util import helper_func, log
+from util.mytype import ChainID, chain_to_string, Key, Metadata, Note, Second, Symbol, string_to_chain, TornadoUnit
 import config
 
 
@@ -293,41 +295,68 @@ def handle_option(enabled_arg: str, args: argparse.Namespace) -> None:
         note_age(str(args.note_age))
 
 
-def _sync(tornado: Tornado, keep: bool, signal: threading.Condition | None = None) -> None:
-    catch_up_bool: bool = False
-    latest_block : int  = 0
-    if not keep and signal is None:
-        signal = threading.Condition()
-    class Handler(Tornado.Handler):
-        def __init__(self, meta: str) -> None:
-            super().__init__()
-            self.meta = meta
-        def on_first_catchup(self, _chain: ChainID, _symbol: Symbol, _unit: TornadoUnit) -> None:
-            nonlocal catch_up_bool
-            nonlocal signal
-            log.info(tag, f'{self.meta}, catch up to the latest blockchain')
-            catch_up_bool = True
-            if signal is None:
-                return
-            if not keep:
-                with signal:
-                    signal.notify_all()
-        def on_sync(self, block_from: int, block_to: int, deposits: list[EventDeposit], withdrawals: list[EventWithdraw]) -> None:
-            nonlocal latest_block
-            log.info(tag, f'{self.meta}, synced {block_to - block_from + 1} blocks from {block_from} to {block_to}, '
-                          f'progress: {min(100.0, 100.0 * block_to / latest_block):.2f}%, '
-                          f'deposits: {len(deposits)}, withdrawals: {len(withdrawals)}')
-        def on_latest_block(self, block_number: int) -> None:
-            nonlocal latest_block
-            latest_block = block_number
-    handler: Handler = Handler(f'{helper_func.upper_first_char(chain_to_string(tornado.chain))}@{tornado.unit.value}{tornado.symbol.value.upper()}')
-    tornado.add_handler(handler)
-    if tornado.start_sync():
-        helper_func.wait(Second(0), signal, True)
+class _SyncProgress(Tornado.Handler):
+
+    def __init__(self, tornado: Tornado) -> None:
+        self.label       : str = f'{helper_func.upper_first_char(chain_to_string(tornado.chain))}@{tornado.unit.value}{tornado.symbol.value.upper()}'
+        self.latest_block: int = 0
+
+    def on_first_catchup(self, _chain: ChainID, _symbol: Symbol, _unit: TornadoUnit) -> None:
+        log.info(tag, f'{self.label}, catch up to the latest blockchain')
+
+    def on_sync(self, block_from: int, block_to: int, deposits: list[EventDeposit], withdrawals: list[EventWithdraw]) -> None:
+        progress: float = min(100.0, 100.0 * block_to / max(1, self.latest_block))
+        log.info(tag, f'{self.label}, synced {block_to - block_from + 1} blocks from {block_from} to {block_to}, '
+                      f'progress: {progress:.2f}%, deposits: {len(deposits)}, withdrawals: {len(withdrawals)}')
+
+    def on_latest_block(self, block_number: int) -> None:
+        self.latest_block = block_number
+
+
+@contextmanager
+def _running_sync(pools: list[Tornado]) -> Iterator[Callable[[Tornado], bool] | None]:
+    """Register every pool before releasing the first RPC query."""
+    start_gate: threading.Event = threading.Event()
+    running   : list[Tornado]   = []
+
+    def finish(tornado: Tornado) -> bool:
+        if not tornado.poller.wait_sync():
+            log.error(tag, 'Synchronization stopped before catch-up.')
+            return False
         tornado.stop_sync()
-    tornado.remove_all_handlers()
-    if not catch_up_bool:
-        raise KeyboardInterrupt
+        tornado.remove_all_handlers()
+        running.remove(tornado)
+        return True
+
+    try:
+        for tornado in pools:
+            if not tornado.start_sync(start_gate=start_gate):
+                log.error(tag, 'Could not start pool synchronization.')
+                yield None
+                return
+            running.append(tornado)
+            tornado.add_handler(_SyncProgress(tornado))
+        start_gate.set()
+        yield finish
+    finally:
+        start_gate.set()
+        for tornado in running:
+            tornado.stop_sync()
+            tornado.remove_all_handlers()
+
+
+def _sync_pools(pools: list[Tornado], keep: bool = False) -> bool:
+    if not pools:
+        return True
+    with _running_sync(pools) as finish:
+        if finish is None:
+            return False
+        if not keep:
+            return all(finish(tornado) for tornado in pools)
+        while any(tornado.poller.is_started() for tornado in pools):
+            sleep(0.5)
+        log.error(tag, 'Pool synchronization stopped.')
+        return False
 
 
 def sync_events(chain: ChainID, symbol: Symbol, unit: TornadoUnit, keep: bool) -> None:
@@ -335,98 +364,39 @@ def sync_events(chain: ChainID, symbol: Symbol, unit: TornadoUnit, keep: bool) -
     if not tornado.init(sync_only=True):
         return
     try:
-        _sync(tornado, keep)
+        _sync_pools([tornado], keep)
     except KeyboardInterrupt:
         log.warn(tag, 'Interrupted')
-    tornado.un_init()
+    finally:
+        tornado.un_init()
 
 
 def sync_all_events(keep: bool) -> None:
-    # Load metadata
-    meta_data: dict[ChainID, Metadata] = helper_func.load_metadata()
-    # Create RPC connections
     connections: dict[ChainID, rpc.Interface] = {}
-    def _stop_all_rpc() -> None:
-        for conn in connections.values():
-            conn.stop()
-    for k, v in meta_data.items():
-        if k not in connections:
-            connections[k] = rpc.Connection(k, config.RPC_URLS[k])
-            try:
-                if not connections[k].start():
-                    log.error(tag, f'Failed to connect to RPC for {chain_to_string(k)}')
-                    return
-            except KeyboardInterrupt:
-                log.warn(tag, 'Interrupted')
-                _stop_all_rpc()
+    instances  : list[Tornado]                = []
+    try:
+        for chain, metadata in helper_func.load_metadata().items():
+            connection: rpc.Interface = rpc.Connection(chain, config.RPC_URLS[chain])
+            connections[chain] = connection
+            if not connection.start():
+                log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
                 return
-    # Create tornado instances
-    instances: list[Tornado] = []
-    for chain_id, metadata in meta_data.items():
-        for symbol, units in metadata.deployment.items():
-            for unit in units.keys():
-                instances.append(Tornado(chain_id, symbol, unit, connections[chain_id]))
-    # Initialize all instances
-    succeed: bool = True
-    initialized: list[Tornado] = []
-    for tornado in instances:
-        if not tornado.init(sync_only=True):
-            succeed = False
-            log.error(tag, f'Failed to initialize {helper_func.upper_first_char(chain_to_string(tornado.chain))} {tornado.unit.value} {tornado.symbol.value}, skip it')
-            break
-        initialized.append(tornado)
-    # If any instance failed to initialize, un-initialize all and return
-    if not succeed:
-        for tornado in initialized:
+            reader: ChainReader = ChainReader(connection, expected_chain_id=chain.value)
+            for symbol, units in metadata.deployment.items():
+                for unit in units:
+                    tornado: Tornado = Tornado(chain, symbol, unit, connection, reader=reader)
+                    instances.append(tornado)
+                    if not tornado.init(sync_only=True):
+                        log.error(tag, f'Failed to initialize {chain_to_string(chain)}@{unit.value}{symbol.value.upper()}')
+                        return
+        _sync_pools(instances, keep)
+    except KeyboardInterrupt:
+        log.warn(tag, 'Interrupted')
+    finally:
+        for tornado in instances:
             tornado.un_init()
-        _stop_all_rpc()
-        return
-    # Start threads
-    signals: list[threading.Condition] = []
-    workers: list[threading.Thread]    = []
-    for tornado in initialized:
-        def job(_t, _s):
-            try:
-                _sync(_t, keep, _s)
-            except KeyboardInterrupt:
-                log.warn(tag, f'{helper_func.upper_first_char(chain_to_string(_t.chain))}@{_t.unit.value}{_t.symbol.value.upper()}, interrupted')
-        signal: threading.Condition = threading.Condition()
-        thread: threading.Thread    = threading.Thread(target=lambda t=tornado, s=signal: job(t, s))
-        thread.start()
-        signals.append(signal)
-        workers.append(thread)
-    # Wait for all threads to finish or be interrupted
-    cond: threading.Condition = threading.Condition()
-    if keep:
-        try:
-            with cond:
-                cond.wait()
-        except KeyboardInterrupt:
-            pass
-    else:
-        all_done: bool = False
-        while not all_done:
-            all_done = True
-            for tornado in initialized:
-                if not tornado.is_catchup():
-                    all_done = False
-            if all_done:
-                break
-            try:
-                with cond:
-                    cond.wait(Second(1))
-            except KeyboardInterrupt:
-                break
-    for signal in signals:
-        with signal:
-            signal.notify_all()
-    for worker in workers:
-        worker.join()
-    # Un-initialize all instances
-    for tornado in initialized:
-        tornado.un_init()
-    # Stop all RPC connections
-    _stop_all_rpc()
+        for connection in connections.values():
+            connection.stop()
 
 
 def _save_deposit_note(tornado: Tornado, note: Note, index: int | None = None) -> str | None:
@@ -652,11 +622,12 @@ def withdraw(note_text: str, recipient: ChecksumAddress, key_or_relayer: Key | s
     if not tornado.init(sync_only=False):
         return
     try:
-        _sync(tornado, False)
-        tornado.withdraw(note, recipient, key_or_relayer)
+        if _sync_pools([tornado]):
+            tornado.withdraw(note, recipient, key_or_relayer)
     except KeyboardInterrupt:
         log.warn(tag, 'Interrupted')
-    tornado.un_init()
+    finally:
+        tornado.un_init()
 
 
 def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: Key | str) -> None:
@@ -676,88 +647,66 @@ def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: 
         if unit not in parsed[chain][symbol]:
             parsed[chain][symbol][unit] = []
         parsed[chain][symbol][unit].append(note)
-    # Create and start RPC connections
     connections: dict[ChainID, rpc.Interface] = {}
-    for chain in parsed.keys():
-        if chain not in config.RPC_URLS:
-            log.error(tag, f'No RPC URL configured for chain: {chain_to_string(chain)}')
-            return None
-        connections[chain] = rpc.Connection(chain, config.RPC_URLS[chain])
-        if not connections[chain].start():
-            log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
-            return None
-    if isinstance(key_or_relayer, Key):
-        try:
-            for chain, v0 in parsed.items():
-                instances: list[Tornado] = []
-                withdrawals: list[tuple[Tornado, Note]] = []
-                try:
-                    for symbol, v1 in v0.items():
-                        for unit, notes in v1.items():
-                            tornado: Tornado = Tornado(chain, symbol, unit, connections[chain])
-                            instances.append(tornado)
-                            if not tornado.init(sync_only=False):
+    try:
+        for chain in parsed:
+            if chain not in config.RPC_URLS:
+                log.error(tag, f'No RPC URL configured for chain: {chain_to_string(chain)}')
+                return
+            connection: rpc.Interface = rpc.Connection(chain, config.RPC_URLS[chain])
+            connections[chain] = connection
+            if not connection.start():
+                log.error(tag, f'Failed to connect to RPC for {chain_to_string(chain)}')
+                return
+
+        for chain, symbols in parsed.items():
+            connection = connections[chain]
+            reader   : ChainReader                      = ChainReader(connection, expected_chain_id=chain.value)
+            instances: list[Tornado]                    = []
+            groups   : list[tuple[Tornado, list[Note]]] = []
+            try:
+                for symbol, units in symbols.items():
+                    for unit, notes in units.items():
+                        tornado: Tornado = Tornado(chain, symbol, unit, connection, reader=reader)
+                        instances.append(tornado)
+                        if not tornado.init(sync_only=False):
+                            if isinstance(key_or_relayer, Key):
                                 return
-                            _sync(tornado, False)
-                            withdrawals.extend((tornado, note) for note in notes)
-                    transaction = batch_tx.withdraw_tx(withdrawals, key_or_relayer.eth_address(), recipient)
-                    tx_hash: HexBytes | None = batch_tx.send(withdrawals[0][0], transaction, key_or_relayer)
-                    if tx_hash is None or not _wait_batch_receipt(connections[chain], tx_hash, 'Withdraw', recipient):
-                        return
-                finally:
-                    for tornado in instances:
-                        tornado.un_init()
-        except KeyboardInterrupt:
-            log.warn(tag, 'Interrupted')
-        except ValueError as e:
-            log.error(tag, f'withdraw_batch() failed: {e}')
-        finally:
-            for conn in connections.values():
-                conn.stop()
-        return
-    # Withdraw
-    for chain, v0 in parsed.items():
-        for symbol, v1 in v0.items():
-            for unit, notes in v1.items():
-                # Create tornado instance and sync events
-                tornado: Tornado = Tornado(chain, symbol, unit, connections[chain])
-                if not tornado.init(sync_only=False):
-                    continue
-                try:
-                    _sync(tornado, False)
-                except KeyboardInterrupt:
-                    log.warn(tag, 'Interrupted')
-                    tornado.un_init()
-                    for conn in connections.values():
-                        conn.stop()
-                    return None
-                # Call withdrawal
-                for note in notes:
-                    tx_hash: HexBytes | None = tornado.withdraw(note, recipient, key_or_relayer)
-                    # Wait until the withdrawal transaction is mined
-                    if tx_hash is None:
-                        continue
-                    log.info(tag, f'Wait 15 seconds for withdrawal transaction to be mined ...')
-                    helper_func.wait(Second(15))
-                    while True:
-                        receipt: TxReceipt | rpc.Error = connections[chain].transaction_receipt(tx_hash)
-                        if rpc.is_error(receipt):
-                            log.warn(tag, f'Wait 5 seconds for withdrawal transaction to be mined, RPC error: {receipt.code.value}')
-                            helper_func.wait(Second(5))
                             continue
-                        if receipt is not None and receipt['blockNumber'] is not None:
-                            if receipt['status'] != 1:
-                                log.error(tag, f'Withdraw transaction failed, tx_hash: {tx_hash.to_0x_hex()}')
-                                break
-                            log.info(tag, f'Withdraw transaction mined in block {receipt["blockNumber"]}, '
-                                          f'tx_hash: {tx_hash.to_0x_hex()}, recipient: {recipient}', log.Color.CYAN, log.Style.BOLD)
-                            break
-                        log.info(tag, f'Wait 5 seconds for withdrawal transaction to be mined ...')
-                        helper_func.wait(Second(5))
-                tornado.un_init()
-    # Stop RPC connections
-    for conn in connections.values():
-        conn.stop()
+                        groups.append((tornado, notes))
+                if not groups:
+                    continue
+                pools: list[Tornado] = [tornado for tornado, _ in groups]
+                if isinstance(key_or_relayer, Key):
+                    if not _sync_pools(pools):
+                        return
+                    withdrawals: list[tuple[Tornado, Note]]  = [(tornado, note) for tornado, notes in groups for note in notes]
+                    transaction: TxParams | rpc.Error | None = batch_tx.withdraw_tx(withdrawals, key_or_relayer.eth_address(), recipient)
+                    tx_hash    : HexBytes | None             = batch_tx.send(withdrawals[0][0], transaction, key_or_relayer)
+                    if tx_hash is None or not _wait_batch_receipt(connection, tx_hash, 'Withdraw', recipient):
+                        return
+                else:
+                    with _running_sync(pools) as finish:
+                        if finish is None:
+                            return
+                        for tornado, notes in groups:
+                            if not finish(tornado):
+                                return
+                            for note in notes:
+                                tx_hash = tornado.withdraw(note, recipient, key_or_relayer)
+                                if tx_hash is not None:
+                                    _wait_batch_receipt(connection, tx_hash, 'Withdraw', recipient)
+            finally:
+                for tornado in instances:
+                    tornado.un_init()
+    except KeyboardInterrupt:
+        log.warn(tag, 'Interrupted')
+    except ValueError as error:
+        log.error(tag, f'withdraw_batch() failed: {error}')
+    finally:
+        for connection in connections.values():
+            connection.stop()
+
 
 def create_note(chain: ChainID, symbol: Symbol, unit: TornadoUnit) -> None:
     note              : Note = Note.create()

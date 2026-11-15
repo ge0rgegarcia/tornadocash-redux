@@ -1,10 +1,9 @@
-from unittest.mock import Mock
-from threading import Event
-
 from eth_abi import encode
 from hexbytes import HexBytes
-import pytest
+from threading import Event
+from unittest.mock import Mock
 from web3.exceptions import ContractCustomError, ContractLogicError, ContractPanicError
+import pytest
 
 from blockchain import rpc
 from util.mytype import ChainID

@@ -1,39 +1,53 @@
+from collections.abc import Mapping, Sequence
 from enum import Enum
-from collections.abc import Mapping
 from eth_abi import decode
 from eth_abi.exceptions import DecodingError
 from eth_account.datastructures import SignedTransaction
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
-from typing import Any, Callable
+from requests import Response
+from requests.exceptions import SSLError, Timeout
+from typing import Any, Callable, TYPE_CHECKING, TypeAlias
 from web3 import Web3
 from web3.contract import Contract
 from web3.datastructures import AttributeDict
 from web3.eth import Eth
-from web3.exceptions import ContractLogicError
+from web3.exceptions import BadResponseFormat, ContractLogicError, TooManyRequests
 from web3.middleware import ExtraDataToPOAMiddleware
-from web3.types import LogReceipt, Nonce, TxData, TxReceipt, TxParams, Wei
+from web3.types import LogReceipt, Nonce, TxData, TxParams, TxReceipt, Wei
+import re
 import threading
 
 from util import log
 from util.mytype import ChainID, Key
 
+if TYPE_CHECKING:
+    from web3 import HTTPProvider
+    from web3.providers.rpc.utils import ExceptionRetryConfiguration
+
+
+LogAddresses: TypeAlias = ChecksumAddress | list[ChecksumAddress]
+LogTopics   : TypeAlias = Sequence[HexBytes | Sequence[HexBytes] | None]
+
 
 class ErrorCode(Enum):
-    UNKNOWN             = 'UNKNOWN'
-    RPC_NOT_STARTED     = 'RPC_NOT_STARTED'
-    RPC_CALL_RATE_LIMIT = 'RPC_CALL_RATE_LIMIT'
-    SSL_ERROR           = 'SSL_ERROR'
-    CONNECTION_ABORTED  = 'CONNECTION_ABORTED'
-    SERVER_ERROR_504    = 'SERVER_ERROR_504'
-    GATEWAY_TIMEOUT     = 'GATEWAY_TIMEOUT'
-    NONCE_TOO_LOW       = 'NONCE_TOO_LOW'
-    TX_HASH_NOT_FOUND   = 'TX_HASH_NOT_FOUND'
-    MAX_FEE_TOO_LOW     = 'MAX_FEE_LESS_THAN_BASE'
-    GAS_LIMIT_EXCEEDED  = 'GAS_LIMIT_EXCEEDED'
-    INSUFFICIENT_FUNDS  = 'INSUFFICIENT_FUNDS'
-    REPLACE_UNDERPRICE  = 'REPLACE_UNDERPRICE'
-    EXECUTION_REVERTED  = 'EXECUTION_REVERTED'
+    UNKNOWN              = 'UNKNOWN'
+    RPC_NOT_STARTED      = 'RPC_NOT_STARTED'
+    RPC_CALL_RATE_LIMIT  = 'RPC_CALL_RATE_LIMIT'
+    RPC_AUTH_FAILED      = 'RPC_AUTH_FAILED'
+    RPC_INVALID_RESPONSE = 'RPC_INVALID_RESPONSE'
+    RPC_CHAIN_MISMATCH   = 'RPC_CHAIN_MISMATCH'
+    SSL_ERROR            = 'SSL_ERROR'
+    CONNECTION_ABORTED   = 'CONNECTION_ABORTED'
+    SERVER_ERROR_504     = 'SERVER_ERROR_504'
+    GATEWAY_TIMEOUT      = 'GATEWAY_TIMEOUT'
+    NONCE_TOO_LOW        = 'NONCE_TOO_LOW'
+    TX_HASH_NOT_FOUND    = 'TX_HASH_NOT_FOUND'
+    MAX_FEE_TOO_LOW      = 'MAX_FEE_LESS_THAN_BASE'
+    GAS_LIMIT_EXCEEDED   = 'GAS_LIMIT_EXCEEDED'
+    INSUFFICIENT_FUNDS   = 'INSUFFICIENT_FUNDS'
+    REPLACE_UNDERPRICE   = 'REPLACE_UNDERPRICE'
+    EXECUTION_REVERTED   = 'EXECUTION_REVERTED'
 
 
 class Error(object):
@@ -54,19 +68,29 @@ def is_error(value: Any) -> bool:
     return False
 
 
-def parse_exception_to_error_code(e: Exception) -> ErrorCode:
-    if isinstance(e, ContractLogicError):
+def _classify_exception(error: Exception, text: str, http_status: int | None, rpc_code: int | None) -> ErrorCode:
+    if isinstance(error, ContractLogicError):
         return ErrorCode.EXECUTION_REVERTED
-    text: str = str(e).lower()
-    if all(key in text for key in ['too many requests', 'rate limit']):
+    if isinstance(error, BadResponseFormat):
+        return ErrorCode.RPC_INVALID_RESPONSE
+    if http_status == 429 or rpc_code == 429 or isinstance(error, TooManyRequests):
         return ErrorCode.RPC_CALL_RATE_LIMIT
-    elif any(key in text for key in ['sslerror', 'ssleoferror']):
+    if http_status in (401, 403) or rpc_code in (401, 403):
+        return ErrorCode.RPC_AUTH_FAILED
+    if 'execution reverted' in text:
+        return ErrorCode.EXECUTION_REVERTED
+    if any(term in text for term in ('too many requests', 'rate limit', 'rate-limit', 'quota exceeded',
+                                     'quota has been exceeded', 'request rate exceeded')):
+        return ErrorCode.RPC_CALL_RATE_LIMIT
+    if isinstance(error, SSLError) or any(key in text for key in ('sslerror', 'ssleoferror')):
         return ErrorCode.SSL_ERROR
-    elif all(key in text for key in ['connection', 'abort']):
+    elif all(key in text for key in ('connection', 'abort')):
         return ErrorCode.CONNECTION_ABORTED
-    elif any(key in text for key in ['504', 'server', 'error']):
+    elif http_status == 504 or '504' in text:
         return ErrorCode.SERVER_ERROR_504
-    elif any(key in text for key in ['gateway', 'timeout']):
+    elif isinstance(error, (Timeout, TimeoutError)) or any(
+        key in text for key in ('gateway timeout', 'timeout', 'timed out')
+    ):
         return ErrorCode.GATEWAY_TIMEOUT
     elif all(key in text for key in ['nonce', 'low']):
         return ErrorCode.NONCE_TOO_LOW
@@ -80,7 +104,33 @@ def parse_exception_to_error_code(e: Exception) -> ErrorCode:
         return ErrorCode.REPLACE_UNDERPRICE
     elif all(key in text for key in ['execution', 'reverted']):
         return ErrorCode.EXECUTION_REVERTED
+    elif any(key in text for key in ('server', 'error')):
+        return ErrorCode.SERVER_ERROR_504
     return ErrorCode.UNKNOWN
+
+
+def _provider_error(error: Exception, call_param: tuple[Any, ...]) -> Error:
+    response    : Response | None = getattr(error, 'response', None)
+    http_status : int | None      = getattr(response, 'status_code', None)
+    rpc_response: object          = getattr(error, 'rpc_response', None)
+    if rpc_response is None and isinstance(response, Response):
+        try:
+            rpc_response = response.json()
+        except (TypeError, ValueError):
+            pass
+    payload: object = rpc_response.get('error', rpc_response) if isinstance(rpc_response, Mapping) else None
+    if not isinstance(payload, Mapping):
+        payload = error.args[0] if error.args and isinstance(error.args[0], Mapping) else {}
+    provider_code: object     = payload.get('code')
+    rpc_code     : int | None = provider_code if type(provider_code) is int else None
+    raw_message  : str        = str(error)
+    text         : str        = f"{raw_message} {payload.get('message', '')}".lower()
+    code         : ErrorCode  = _classify_exception(error, text, http_status, rpc_code)
+    return Error(code, call_param, raw_message, _exception_reason(error))
+
+
+def parse_exception_to_error_code(e: Exception) -> ErrorCode:
+    return _provider_error(e, ()).code
 
 
 def decode_revert(data: str | bytes | None) -> str | None:
@@ -126,8 +176,7 @@ def contract_call(contract: Contract, method: str, *args) -> Any | Error:
         result: Any = func(*args).call()
         return result
     except Exception as e:
-        code: ErrorCode = parse_exception_to_error_code(e)
-        return Error(code, (contract.address, method, args), str(e), _exception_reason(e))
+        return _provider_error(e, (contract.address, method, args))
 
 
 def contract_build_tx(contract: Contract, method: str | None, tx_params: TxParams, *args) -> TxParams | Error:
@@ -136,8 +185,7 @@ def contract_build_tx(contract: Contract, method: str | None, tx_params: TxParam
         tx: TxParams = func(*args).build_transaction(tx_params)
         return tx
     except Exception as e:
-        code: ErrorCode = parse_exception_to_error_code(e)
-        return Error(code, (contract.address, method, tx_params, args), str(e), _exception_reason(e))
+        return _provider_error(e, (contract.address, method, tx_params, args))
 
 
 class Web3EthWrapper(Eth):
@@ -175,7 +223,11 @@ class Interface(object):
     def latest_block_number(self, callback: Callable[[int | Error], None] = None) -> int | Error | None:
         raise NotImplementedError
 
-    def log_receipt(self, contract_address: ChecksumAddress, blk_num_from: int, blk_num_to: int, event_hash: list[HexBytes], callback: Callable[[list[LogReceipt]|Error], None] = None) -> list[LogReceipt]|Error|None:
+    def remote_chain_id(self) -> int | Error:
+        raise NotImplementedError
+
+    def log_receipt(self, contract_address: LogAddresses, blk_num_from: int, blk_num_to: int, event_hash: LogTopics,
+                    callback: Callable[[list[LogReceipt] | Error], None] | None = None) -> list[LogReceipt] | Error | None:
         raise NotImplementedError
 
     def transaction_receipt(self, tx_hash: HexBytes, callback: Callable[[tuple[HexBytes, TxReceipt] | Error], None] = None) -> TxReceipt | Error | None:
@@ -222,7 +274,15 @@ class Connection(Interface):
         else:
             log.debug(self.TAG, f'start({self})')
         if self.url.startswith('http'):
-            self.w3 = Web3(Web3.HTTPProvider(self.url))
+            provider: HTTPProvider                       = Web3.HTTPProvider(self.url)
+            retry   : ExceptionRetryConfiguration | None = provider.exception_retry_configuration
+            if retry is not None:
+                # The event poller handles retries for synchronization reads.
+                retry.method_allowlist = [
+                    method for method in retry.method_allowlist
+                    if method not in ('eth_chainId', 'eth_blockNumber', 'eth_getLogs')
+                ]
+            self.w3 = Web3(provider)
         elif self.url.startswith('ws'):
             self.w3 = Web3(Web3.LegacyWebSocketProvider(self.url))
         else:
@@ -286,9 +346,30 @@ class Connection(Interface):
             return self.run_sync(_, signature, call_param)
         self.run_async(_, signature, call_param, callback)
 
-    def log_receipt(self, contract_address: ChecksumAddress, blk_num_from: int, blk_num_to: int, event_hash: list[HexBytes], callback: Callable[[list[LogReceipt]|Error], None] = None) -> list[LogReceipt]|Error|None:
+    def remote_chain_id(self) -> int | Error:
+        """Read the provider's chain ID before trusting its data."""
+        if self.turn_off:
+            return Error(ErrorCode.RPC_NOT_STARTED, ())
+
+        def read() -> int | Error:
+            try:
+                # self.w3.eth.chain_id is the configured chain, not a remote read.
+                value: object = self.w3.manager.request_blocking('eth_chainId', [])
+            except BadResponseFormat:
+                return Error(ErrorCode.RPC_INVALID_RESPONSE, ())
+            if isinstance(value, str) and re.fullmatch(r'0x[0-9a-fA-F]+', value):
+                value = int(value, 16)
+            if type(value) is int and value > 0:
+                return value
+            return Error(ErrorCode.RPC_INVALID_RESPONSE, ())
+
+        result: int | Error | None = self.run_sync(read, 'remote_chain_id()', ())
+        return result if result is not None else Error(ErrorCode.RPC_NOT_STARTED, ())
+
+    def log_receipt(self, contract_address: LogAddresses, blk_num_from: int, blk_num_to: int, event_hash: LogTopics,
+                    callback: Callable[[list[LogReceipt] | Error], None] | None = None) -> list[LogReceipt] | Error | None:
         call_param: tuple[Any, ...] = (contract_address, blk_num_from, blk_num_to, event_hash, callback)
-        signature: str = f'log_receipt(contract_address={contract_address}, blk_num_from={blk_num_from}, blk_num_to={blk_num_to}, event_hash={event_hash}, async={True if callback else False})'
+        signature : str             = f'log_receipt(contract_address={contract_address}, blk_num_from={blk_num_from}, blk_num_to={blk_num_to}, event_hash={event_hash}, async={True if callback else False})'
         def _() -> list[LogReceipt]:
             return self.w3.eth.get_logs({
                 'address'  : contract_address,
@@ -410,10 +491,9 @@ class Connection(Interface):
                 try:
                     result = action()
                 except Exception as e:
-                    code : ErrorCode = parse_exception_to_error_code(e)
-                    lines: list[str] = [f'{signature} raised {type(e)} exception, {code.value}']
+                    result = _provider_error(e, call_param)
+                    lines: list[str] = [f'{signature} raised {type(e)} exception, {result.code.value}']
                     log.debug(self.TAG, lines)
-                    result = Error(code, call_param, str(e), _exception_reason(e))
                 break
             done = True
             done_event.set()
@@ -434,10 +514,9 @@ class Connection(Interface):
                 try:
                     result = action()
                 except Exception as e:
-                    code : ErrorCode = parse_exception_to_error_code(e)
-                    lines: list[str] = [f'{signature} raised {type(e)} exception, {code.value}']
+                    result = _provider_error(e, call_param)
+                    lines: list[str] = [f'{signature} raised {type(e)} exception, {result.code.value}']
                     log.debug(self.TAG, lines)
-                    result = Error(code, call_param, str(e), _exception_reason(e))
                 break
             callback(result)
         with self.condition:

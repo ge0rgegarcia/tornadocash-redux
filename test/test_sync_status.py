@@ -1,26 +1,25 @@
-import json
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
+from hexbytes import HexBytes
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
 from unittest.mock import Mock
-
+import json
 import pytest
-from hexbytes import HexBytes
+import threading
+import time
 
-from blockchain import sync, rpc
+from blockchain import rpc, sync
 from util.mytype import ChainID
 
 
 @pytest.fixture
-def poller(monkeypatch: pytest.MonkeyPatch) -> sync.EventPoller:
+def poller(monkeypatch: pytest.MonkeyPatch) -> sync.PoolPoller:
     connection: SimpleNamespace = SimpleNamespace(
         started=lambda: True,
         latest_block_number=lambda: 5,
         log_receipt=lambda *args: [],
     )
-    value: sync.EventPoller = sync.EventPoller(ChainID.ETHEREUM, connection, poll_interval=15)
+    value     : sync.PoolPoller = sync.PoolPoller(ChainID.ETHEREUM, connection, poll_interval=15)
     value.off = False
     value.contract = '0x0000000000000000000000000000000000000001'
     monkeypatch.setitem(sync.config.BLOCKCHAIN_LOG_EVENT_POLL_BLOCKS_PER_REQUEST, value.chain, 2)
@@ -29,20 +28,20 @@ def poller(monkeypatch: pytest.MonkeyPatch) -> sync.EventPoller:
 
 
 @pytest.mark.parametrize(('activity', 'value'), [
-    (sync.EventPoller.Activity.IDLE, 'idle'),
-    (sync.EventPoller.Activity.FETCHING_HEAD, 'fetching_head'),
-    (sync.EventPoller.Activity.FETCHING_EVENTS, 'fetching_events'),
-    (sync.EventPoller.Activity.RETRY_WAIT, 'retry_wait'),
-    (sync.EventPoller.Activity.PERSISTING, 'persisting'),
+    (sync.PoolPoller.Activity.IDLE, 'idle'),
+    (sync.PoolPoller.Activity.FETCHING_HEAD, 'fetching_head'),
+    (sync.PoolPoller.Activity.FETCHING_EVENTS, 'fetching_events'),
+    (sync.PoolPoller.Activity.RETRY_WAIT, 'retry_wait'),
+    (sync.PoolPoller.Activity.PERSISTING, 'persisting'),
 ])
-def test_activity_status_serializes_as_string(poller: sync.EventPoller, activity: sync.EventPoller.Activity, value: str) -> None:
+def test_activity_status_serializes_as_string(poller: sync.PoolPoller, activity: sync.PoolPoller.Activity, value: str) -> None:
     poller.activity = activity
     assert json.loads(json.dumps(poller.status()))['activity'] == value
     assert poller.activity is activity
 
 
 @pytest.fixture
-def waiter(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[ThreadPoolExecutor, threading.Event]]:
+def waiter(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[ThreadPoolExecutor, threading.Event]]:
     entered: threading.Event = threading.Event()
     original_wait = poller.cond.wait
 
@@ -62,7 +61,7 @@ def waiter(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> Iterato
 
 
 @pytest.fixture
-def idle_poll(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> Iterator[threading.Event]:
+def idle_poll(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch) -> Iterator[threading.Event]:
     sleeping: threading.Event = threading.Event()
     original_wait = poller.cond.wait_for
     poller.poll_interval = 600
@@ -81,7 +80,7 @@ def idle_poll(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> Iter
 
 
 @pytest.mark.parametrize(('age', 'refresh', 'calls'), [(0, False, 1), (61, False, 2), (0, True, 2)])
-def test_wait_sync_refreshes_long_idle_only_when_needed(poller: sync.EventPoller, idle_poll: threading.Event,
+def test_wait_sync_refreshes_long_idle_only_when_needed(poller: sync.PoolPoller, idle_poll: threading.Event,
                                                       waiter: tuple[ThreadPoolExecutor, threading.Event],
                                                       age: int, refresh: bool, calls: int) -> None:
     head: Mock = Mock(side_effect=[5, 7])
@@ -98,7 +97,7 @@ def test_wait_sync_refreshes_long_idle_only_when_needed(poller: sync.EventPoller
     assert poller.poll_interval == 600
 
 
-def test_refresh_before_idle_predicate_is_not_lost(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch,
+def test_refresh_before_idle_predicate_is_not_lost(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch,
                                                  idle_poll: threading.Event, waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     head: Mock = Mock(side_effect=[5, 7])
     poller.connection.latest_block_number = head
@@ -124,7 +123,7 @@ def test_refresh_before_idle_predicate_is_not_lost(poller: sync.EventPoller, mon
     assert head.call_count == 2
 
 
-def test_concurrent_refreshes_share_one_pending_head(poller: sync.EventPoller, idle_poll: threading.Event) -> None:
+def test_concurrent_refreshes_share_one_pending_head(poller: sync.PoolPoller, idle_poll: threading.Event) -> None:
     fetching: threading.Event = threading.Event()
     release : threading.Event = threading.Event()
     calls: list[int] = []
@@ -160,7 +159,7 @@ def test_concurrent_refreshes_share_one_pending_head(poller: sync.EventPoller, i
     assert len(calls) == 3
 
 
-def test_refresh_during_inflight_head_requires_a_new_request(poller: sync.EventPoller, idle_poll: threading.Event,
+def test_refresh_during_inflight_head_requires_a_new_request(poller: sync.PoolPoller, idle_poll: threading.Event,
                                                           waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     fetching: threading.Event = threading.Event()
     release : threading.Event = threading.Event()
@@ -190,7 +189,7 @@ def test_refresh_during_inflight_head_requires_a_new_request(poller: sync.EventP
         release.set()
 
 
-def test_stale_waiter_reuses_a_slow_refresh_instead_of_requeuing(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch,
+def test_stale_waiter_reuses_a_slow_refresh_instead_of_requeuing(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch,
                                                               idle_poll: threading.Event, waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     fetching: threading.Event = threading.Event()
     cycled  : threading.Event = threading.Event()
@@ -232,7 +231,7 @@ def test_stale_waiter_reuses_a_slow_refresh_instead_of_requeuing(poller: sync.Ev
 
 
 @pytest.mark.parametrize(('age', 'refresh'), [(61, False), (0, True)])
-def test_refresh_during_persistence_survives_the_old_round(poller: sync.EventPoller,
+def test_refresh_during_persistence_survives_the_old_round(poller: sync.PoolPoller,
                                                         idle_poll: threading.Event, waiter: tuple[ThreadPoolExecutor, threading.Event],
                                                         age: int, refresh: bool) -> None:
     writing: threading.Event = threading.Event()
@@ -240,7 +239,7 @@ def test_refresh_during_persistence_survives_the_old_round(poller: sync.EventPol
     head: Mock = Mock(side_effect=[5, 7])
     poller.connection.latest_block_number = head
 
-    class Storage(sync.EventPoller.Handler):
+    class Storage(sync.PoolPoller.Handler):
 
         def on_sync(self, start: int, end: int, deposits: list[sync.EventDeposit], withdrawals: list[sync.EventWithdraw]) -> None:
             if start == 4:
@@ -266,7 +265,7 @@ def test_refresh_during_persistence_survives_the_old_round(poller: sync.EventPol
         release.set()
 
 
-def test_refresh_does_not_interrupt_rpc_retry_delay(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch,
+def test_refresh_does_not_interrupt_rpc_retry_delay(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch,
                                                   idle_poll: threading.Event, waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     retrying: threading.Event = threading.Event()
     notified: list[bool] = []
@@ -291,7 +290,7 @@ def test_refresh_does_not_interrupt_rpc_retry_delay(poller: sync.EventPoller, mo
 
 
 @pytest.mark.parametrize('state', ['connecting', 'syncing', 'retrying', 'stale'])
-def test_wait_sync_resumes_only_when_ready_and_fresh(poller: sync.EventPoller,
+def test_wait_sync_resumes_only_when_ready_and_fresh(poller: sync.PoolPoller,
                                                    waiter: tuple[ThreadPoolExecutor, threading.Event], state: str) -> None:
     poller.current        = 6
     poller.latest_block   = None if state == 'connecting' else 5
@@ -315,7 +314,7 @@ def test_wait_sync_resumes_only_when_ready_and_fresh(poller: sync.EventPoller,
     assert result.result(timeout=1) is True
 
 
-def test_wait_sync_cancel_exits_without_a_notification(poller: sync.EventPoller,
+def test_wait_sync_cancel_exits_without_a_notification(poller: sync.PoolPoller,
                                                       waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     worker, entered = waiter
     cancel: threading.Event = threading.Event()
@@ -325,7 +324,7 @@ def test_wait_sync_cancel_exits_without_a_notification(poller: sync.EventPoller,
     assert result.result(timeout=1) is False
 
 
-def test_wait_sync_stop_wakes_waiter(poller: sync.EventPoller,
+def test_wait_sync_stop_wakes_waiter(poller: sync.PoolPoller,
                                    waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     worker, entered = waiter
     result = worker.submit(poller.wait_sync)
@@ -337,12 +336,12 @@ def test_wait_sync_stop_wakes_waiter(poller: sync.EventPoller,
 
 
 @pytest.mark.parametrize('fail', [False, True])
-def test_wait_sync_waits_for_persistence_then_catchup(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch,
+def test_wait_sync_waits_for_persistence_then_catchup(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch,
                                                    waiter: tuple[ThreadPoolExecutor, threading.Event], fail: bool) -> None:
     writing: threading.Event = threading.Event()
     release: threading.Event = threading.Event()
 
-    class Storage(sync.EventPoller.Handler):
+    class Storage(sync.PoolPoller.Handler):
 
         def on_sync(self, start: int, end: int, deposits: list[sync.EventDeposit], withdrawals: list[sync.EventWithdraw]) -> None:
             writing.set()
@@ -374,7 +373,7 @@ def test_wait_sync_waits_for_persistence_then_catchup(poller: sync.EventPoller, 
         poller.stop()
 
 
-def test_wait_sync_survives_rpc_retry_until_recovery(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch,
+def test_wait_sync_survives_rpc_retry_until_recovery(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch,
                                                    waiter: tuple[ThreadPoolExecutor, threading.Event]) -> None:
     retrying: threading.Event = threading.Event()
     release : threading.Event = threading.Event()
@@ -406,7 +405,7 @@ def test_wait_sync_survives_rpc_retry_until_recovery(poller: sync.EventPoller, m
 
 
 @pytest.mark.parametrize('start_block', [0, 516_873_190, 517_143_055])
-def test_progress_uses_displayed_heights_independent_of_restart_start(poller: sync.EventPoller, start_block: int) -> None:
+def test_progress_uses_displayed_heights_independent_of_restart_start(poller: sync.PoolPoller, start_block: int) -> None:
     poller.start_block  = start_block
     poller.current      = 517_143_056
     poller.latest_block = 517_499_325
@@ -422,17 +421,17 @@ def test_progress_uses_displayed_heights_independent_of_restart_start(poller: sy
     (100, 0, 0.0), (100, 101, 1.0), (100, 102, 1.0),
     (0, 0, 0.0), (0, 1, 1.0), (0, 2, 1.0),
 ])
-def test_progress_clamps_known_heights_and_handles_genesis(poller: sync.EventPoller, latest_block: int, current: int, expected: float) -> None:
+def test_progress_clamps_known_heights_and_handles_genesis(poller: sync.PoolPoller, latest_block: int, current: int, expected: float) -> None:
     poller.latest_block = latest_block
     poller.current      = current
     assert poller.status()['progress'] == expected
 
 
-def test_progress_waits_for_persistence(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_progress_waits_for_persistence(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch) -> None:
     before_commit: list[dict[str, Any]] = []
     caught_up    : list[dict[str, Any]] = []
 
-    class Storage(sync.EventPoller.Handler):
+    class Storage(sync.PoolPoller.Handler):
 
         def on_sync(self, start: int, end: int, deposits: list[sync.EventDeposit], withdrawals: list[sync.EventWithdraw]) -> None:
             before_commit.append(poller.status())
@@ -458,7 +457,7 @@ def test_progress_waits_for_persistence(poller: sync.EventPoller, monkeypatch: p
     assert poller.status()['phase'] == 'stopped'
 
 
-def test_initial_head_retry_has_no_progress_until_recovery(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_initial_head_retry_has_no_progress_until_recovery(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch) -> None:
     initial: dict[str, Any] = poller.status()
     assert initial['running'] and initial['error'] is None
     assert initial['phase'] == 'connecting'
@@ -469,7 +468,7 @@ def test_initial_head_retry_has_no_progress_until_recovery(poller: sync.EventPol
     retrying: list[dict[str, Any]] = []
     recovered: list[dict[str, Any]] = []
 
-    class Storage(sync.EventPoller.Handler):
+    class Storage(sync.PoolPoller.Handler):
 
         def on_latest_block(self, block_number: int) -> None:
             recovered.append(poller.status())
@@ -498,13 +497,13 @@ def test_initial_head_retry_has_no_progress_until_recovery(poller: sync.EventPol
     assert recovered[-1]['phase'] == 'ready'
 
 
-def test_log_retry_pauses_progress_and_recovers_after_success(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_log_retry_pauses_progress_and_recovers_after_success(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch) -> None:
     logs = iter([rpc.Error(rpc.ErrorCode.GATEWAY_TIMEOUT, (), 'log request timed out')])
     poller.connection.log_receipt = lambda *args: next(logs, [])
     retrying: list[dict[str, Any]] = []
     recovered: list[dict[str, Any]] = []
 
-    class Storage(sync.EventPoller.Handler):
+    class Storage(sync.PoolPoller.Handler):
 
         def on_sync(self, start: int, end: int, deposits: list[sync.EventDeposit], withdrawals: list[sync.EventWithdraw]) -> None:
             recovered.append(poller.status())
@@ -532,7 +531,7 @@ def test_log_retry_pauses_progress_and_recovers_after_success(poller: sync.Event
     assert [status['synced_block'] for status in recovered] == [-1, 1, 3]
 
 
-def test_failed_write_keeps_last_committed_block(poller: sync.EventPoller) -> None:
+def test_failed_write_keeps_last_committed_block(poller: sync.PoolPoller) -> None:
     def logs(contract: str, start: int, end: int, topics: list[HexBytes]) -> list[dict[str, Any]]:
         if topics != [sync.EventDeposit.event_hash()]:
             return []
@@ -545,7 +544,7 @@ def test_failed_write_keeps_last_committed_block(poller: sync.EventPoller) -> No
 
     poller.connection.log_receipt = logs
 
-    class Storage(sync.EventPoller.Handler):
+    class Storage(sync.PoolPoller.Handler):
 
         def on_sync(self, start: int, end: int, deposits: list[sync.EventDeposit], withdrawals: list[sync.EventWithdraw]) -> None:
             if start == 2:
@@ -565,7 +564,7 @@ def test_failed_write_keeps_last_committed_block(poller: sync.EventPoller) -> No
     assert status['phase'] == 'error' and status['activity'] == 'idle'
 
 
-def test_rpc_failure_revokes_synchronized_status(poller: sync.EventPoller, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rpc_failure_revokes_synchronized_status(poller: sync.PoolPoller, monkeypatch: pytest.MonkeyPatch) -> None:
     latest = iter([5, rpc.Error(rpc.ErrorCode.GATEWAY_TIMEOUT, ())])
     poller.connection.latest_block_number = lambda: next(latest)
     statuses: list[dict[str, Any]] = []
@@ -587,8 +586,8 @@ def test_rpc_failure_revokes_synchronized_status(poller: sync.EventPoller, monke
     assert statuses[1]['progress'] is None
 
 
-def test_failed_catchup_callback_is_visible(poller: sync.EventPoller) -> None:
-    class Storage(sync.EventPoller.Handler):
+def test_failed_catchup_callback_is_visible(poller: sync.PoolPoller) -> None:
+    class Storage(sync.PoolPoller.Handler):
 
         def on_first_catchup(self) -> None:
             raise RuntimeError('catchup failed')

@@ -1,30 +1,29 @@
 """Local WebSocket backend; www/ is an independent static frontend."""
 
+from dataclasses import dataclass, field
+from eth_typing import ChecksumAddress
+from functools import partial
+from hexbytes import HexBytes
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import quote
+from web3 import Web3
+from websockets.asyncio.server import ServerConnection, serve
+from websockets.exceptions import ConnectionClosed
 import asyncio
 import json
 import re
 import signal
 import threading
-from dataclasses import dataclass, field
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from typing import Any, Callable
-from urllib.parse import quote
 
-from eth_typing import ChecksumAddress
-from hexbytes import HexBytes
-from web3 import Web3
-from websockets.asyncio.server import ServerConnection, serve
-from websockets.exceptions import ConnectionClosed
-
-import config
-from core import batch_tx
-from util import log, helper_func
 from blockchain import rpc
-from blockchain.sync import EventDeposit, EventPoller, EventWithdraw
+from blockchain.sync import ChainReader, EventDeposit, EventWithdraw
+from core import batch_tx
 from core.pool import Tornado
-from util.mytype import ChainID, Metadata, Note, Symbol, SymbolType, TornadoUnit, chain_to_string
+from util import helper_func, log
+from util.mytype import ChainID, chain_to_string, Metadata, Note, Symbol, SymbolType, TornadoUnit
+import config
 
 
 STATUS_MESSAGES: dict[str, str] = {
@@ -131,7 +130,8 @@ class Backend:
                 self.connections[chain] = connection
                 if not await asyncio.to_thread(connection.start):
                     raise RuntimeError('RPC connection failed to start')
-                await asyncio.gather(*(asyncio.to_thread(self._start, item) for item in items))
+                reader: ChainReader = ChainReader(connection, expected_chain_id=chain.value)
+                await asyncio.gather(*(asyncio.to_thread(self._start, item, reader) for item in items))
             except Exception:
                 message: str = 'RPC initialization failed.'
                 log.error('WebUI', f'{chain_to_string(chain)}: {message}')
@@ -140,7 +140,7 @@ class Backend:
         # Then starts core.Tornado
         await asyncio.gather(*(start_chain(chain) for chain in {item.chain for item in self.instances.values()}))
 
-    def _start(self, item: Instance) -> None:
+    def _start(self, item: Instance, reader: ChainReader) -> None:
         with item.lock:
             if self.stopping:
                 return
@@ -149,8 +149,7 @@ class Backend:
                 item.phase = 'initializing'
                 chain     : ChainID        = item.chain
                 connection: rpc.Connection = self.connections[chain]
-                tornado = Tornado(chain, item.symbol, item.unit, connection)
-                tornado.poller = EventPoller(chain, connection)
+                tornado = Tornado(chain, item.symbol, item.unit, connection, reader=reader)
                 if not tornado.init(sync_only=True):
                     raise RuntimeError('Could not initialize database.')
                 totals: tuple[int, int] | None = tornado.db.get_event_counts()

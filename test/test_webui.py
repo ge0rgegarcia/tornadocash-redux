@@ -1,23 +1,23 @@
-import asyncio
-import json
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from hexbytes import HexBytes
 from http.client import HTTPConnection
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
-
-from hexbytes import HexBytes
-import pytest
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.asyncio.server import ServerConnection, serve
+import asyncio
+import json
+import pytest
+import threading
+import time
 
-import webui
-from util.mytype import ChainID, Second, Symbol, TornadoUnit
+from blockchain.sync import PoolPoller
 from contracts import compiler
+from util.mytype import ChainID, Second, Symbol, TornadoUnit
+import webui
 
 
 INSTANCE = 'ethereum-dai-1'
@@ -136,11 +136,11 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> webui.Backend:
 
 
 @pytest.fixture
-def waiting_poller(backend: webui.Backend, monkeypatch: pytest.MonkeyPatch) -> tuple[webui.EventPoller, threading.Event]:
-    poller: webui.EventPoller = webui.EventPoller(ChainID.ETHEREUM, SimpleNamespace())
+def waiting_poller(backend: webui.Backend, monkeypatch: pytest.MonkeyPatch) -> tuple[PoolPoller, threading.Event]:
+    poller: PoolPoller = PoolPoller(ChainID.ETHEREUM, SimpleNamespace())
     poller.off, poller.current, poller.latest_block = False, 99, 99
     poller.last_check_sec = time.time()
-    poller.activity = webui.EventPoller.Activity.FETCHING_EVENTS
+    poller.activity = PoolPoller.Activity.FETCHING_EVENTS
     backend.instances[INSTANCE].tornado.poller = poller
     entered: threading.Event = threading.Event()
     wait = poller.cond.wait
@@ -581,7 +581,7 @@ def test_dispatch_routes_arguments(backend: webui.Backend, operations: dict[str,
 
 @pytest.mark.parametrize('method', ['withdraw', 'relay_withdraw'])
 def test_proof_waits_before_and_after_tree_building_without_blocking_sync(backend: webui.Backend, operations: dict[str, Mock],
-                                                                        waiting_poller: tuple[webui.EventPoller, threading.Event], method: str) -> None:
+                                                                        waiting_poller: tuple[PoolPoller, threading.Event], method: str) -> None:
     poller, entered = waiting_poller
     tornado: FakeTornado = backend.instances[INSTANCE].tornado
     other: FakeTornado = backend.instances['ethereum-dai-10'].tornado
@@ -641,7 +641,7 @@ def test_withdrawal_wakes_idle_poller_before_proving(backend: webui.Backend, ope
     head, persisted = [100], []
     idle, writing, release, cancelled = (threading.Event() for _ in range(4))
     connection: SimpleNamespace = SimpleNamespace(started=lambda: True, latest_block_number=lambda: head[0], log_receipt=lambda *args: [])
-    poller: webui.EventPoller = webui.EventPoller(ChainID.ETHEREUM, connection)
+    poller    : PoolPoller      = PoolPoller(ChainID.ETHEREUM, connection)
     backend.instances[INSTANCE].tornado.poller = poller
     original_wait = poller.cond.wait
 
@@ -650,7 +650,7 @@ def test_withdrawal_wakes_idle_poller_before_proving(backend: webui.Backend, ope
             idle.set()
         return original_wait(timeout)
 
-    class Storage(webui.EventPoller.Handler):
+    class Storage(PoolPoller.Handler):
 
         def on_sync(self, start: int, end: int, deposits: list, withdrawals: list) -> None:
             if end == 101:
@@ -705,7 +705,7 @@ def test_withdrawal_wakes_idle_poller_before_proving(backend: webui.Backend, ope
 
 @pytest.mark.parametrize('method', ['withdraw', 'relay_withdraw'])
 def test_stopped_sync_cannot_start_proof(backend: webui.Backend, operations: dict[str, Mock],
-                                       waiting_poller: tuple[webui.EventPoller, threading.Event], method: str) -> None:
+                                       waiting_poller: tuple[PoolPoller, threading.Event], method: str) -> None:
     poller, _ = waiting_poller
     poller.off = True
     with pytest.raises(RuntimeError, match='Synchronization has stopped'):
@@ -967,17 +967,16 @@ def test_start_runs_connection_off_event_loop_and_loads_counts_before_sync(backe
         return True
 
     connection: SimpleNamespace = SimpleNamespace(start=Mock(side_effect=start_connection), stop=Mock())
-    pollers: Mock = Mock(side_effect=FakePoller)
     monkeypatch.setattr(webui.rpc, 'Connection', Mock(return_value=connection))
-    monkeypatch.setattr(webui, 'EventPoller', pollers)
 
     class FakeTornado:
 
-        def __init__(self, *args: Any) -> None:
+        def __init__(self, *args: Any, reader: webui.ChainReader) -> None:
             self.name           : str             = f'ethereum-dai-{args[2].value}'
             self.last_update_sec: Second | None   = None
             self.db             : SimpleNamespace = SimpleNamespace(get_event_counts=lambda: order.append('counts') or (50, 20))
             self.un_init        : Mock            = Mock()
+            self.poller         : FakePoller      = FakePoller()
 
         def init(self, sync_only: bool) -> bool:
             assert sync_only
@@ -995,7 +994,8 @@ def test_start_runs_connection_off_event_loop_and_loads_counts_before_sync(backe
             assert self.handler.item.totals == (50, 20)
             return True
 
-    monkeypatch.setattr(webui, 'Tornado', FakeTornado)
+    constructor: Mock = Mock(side_effect=FakeTornado)
+    monkeypatch.setattr(webui, 'Tornado', constructor)
 
     async def scenario() -> None:
         for item in backend.instances.values():
@@ -1008,8 +1008,13 @@ def test_start_runs_connection_off_event_loop_and_loads_counts_before_sync(backe
 
     asyncio.run(scenario())
     assert order.count('init') == order.count('sync') == 2
-    assert pollers.call_count == 2
-    assert all(call.args == (ChainID.ETHEREUM, connection) and not call.kwargs for call in pollers.call_args_list)
+    assert constructor.call_count == 2
+    reader: webui.ChainReader = constructor.call_args_list[0].kwargs['reader']
+    assert isinstance(reader, webui.ChainReader)
+    assert reader.connection is connection
+    for call in constructor.call_args_list:
+        assert call.args[0] == ChainID.ETHEREUM and call.args[3] is connection
+        assert call.kwargs == {'reader': reader}
     connection.start.assert_called_once()
     connection.stop.assert_called_once()
 
@@ -1062,7 +1067,7 @@ def test_close_waits_for_active_operation_and_rejects_new_work(backend: webui.Ba
 
 
 def test_shutdown_cancels_sync_wait_and_releases_the_instance(backend: webui.Backend, operations: dict[str, Mock],
-                                                             waiting_poller: tuple[webui.EventPoller, threading.Event]) -> None:
+                                                             waiting_poller: tuple[PoolPoller, threading.Event]) -> None:
     poller, entered = waiting_poller
     item: webui.Instance = backend.instances[INSTANCE]
 
@@ -1249,7 +1254,7 @@ def test_websocket_progress_is_live_isolated_and_drained_before_result(backend: 
 
 
 def test_websocket_disconnect_cancels_sync_wait_and_releases_the_instance(backend: webui.Backend, operations: dict[str, Mock],
-                                                                        waiting_poller: tuple[webui.EventPoller, threading.Event],
+                                                                        waiting_poller: tuple[PoolPoller, threading.Event],
                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
     poller, entered = waiting_poller
     released: threading.Event = threading.Event()
