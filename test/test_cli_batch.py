@@ -7,7 +7,7 @@ from hexbytes import HexBytes
 import pytest
 
 import cli
-from components.mytype import ChainID, Key, Note, Symbol, TornadoUnit
+from util.mytype import ChainID, Key, Note, Symbol, TornadoUnit
 
 
 ACCOUNT = '0x' + '11' * 20
@@ -23,7 +23,7 @@ def environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamesp
     monkeypatch.setattr(Key, 'eth_address', lambda self: ACCOUNT)
     monkeypatch.setattr(cli.config, 'BACKUP_DIR', str(tmp_path))
     monkeypatch.setattr(cli.config, 'RPC_URLS', {chain: 'mock://' + chain.name for chain in ChainID})
-    monkeypatch.setattr(cli.util, 'wait', lambda _: None)
+    monkeypatch.setattr(cli.helper_func, 'wait', lambda _: None)
     monkeypatch.setattr(cli, '_sync', Mock())
     monkeypatch.setattr(cli.log, 'info', Mock())
     monkeypatch.setattr(cli.log, 'warn', Mock())
@@ -187,7 +187,7 @@ def test_erc20_batch_receipt_timeout_keeps_notes(environment: SimpleNamespace, m
         return HASH
 
     monkeypatch.setattr(cli, 'monotonic', lambda: elapsed)
-    monkeypatch.setattr(cli.util, 'wait', wait)
+    monkeypatch.setattr(cli.helper_func, 'wait', wait)
     env.send.side_effect = send
     cli.deposit_batch(env.key, "{'ethereum':{'dai':{'100':2}}}")
     assert elapsed == 120 + 15 * ['deploy', 'approve', 'deposit'].index(operation)

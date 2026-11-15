@@ -1,13 +1,13 @@
+from typing import Any, Callable
+from web3.types import Wei
 import inspect
 import json
 import os
 import signal
 import threading
 import time
-from typing import Any, Callable
-from web3.types import Wei
 
-from .mytype import ChainID, Metadata, Second, Symbol, SymbolType, TornadoUnit, string_to_chain
+from .mytype import ChainID, Metadata, Second, Symbol, SymbolType, string_to_chain, TornadoUnit
 import config
 
 

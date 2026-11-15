@@ -1,8 +1,9 @@
 from hexbytes import HexBytes
 from web3.types import TxParams
 
-from . import log, rpc
-from .mytype import Key
+from blockchain import rpc
+from util import log
+from util.mytype import Key
 
 
 def send(connection: rpc.Interface, transaction: TxParams | rpc.Error | None, key: Key,

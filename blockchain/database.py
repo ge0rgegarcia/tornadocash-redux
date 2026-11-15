@@ -5,9 +5,10 @@ from enum import Enum
 from hexbytes import HexBytes
 from typing import Any
 
-from . import blockchain, log, util
-from .executor import Job, Queue
-from .mytype import ChainID, Metadata, Symbol, TornadoUnit
+from .sync import EventDeposit, EventWithdraw
+from util import log, helper_func
+from util.executor import Job, Queue
+from util.mytype import ChainID, Metadata, Symbol, TornadoUnit
 import config
 
 
@@ -90,8 +91,8 @@ class Interface(object):
     @param  withdrawals     List of withdraw events, existing events (by tx_hash and nullifier_hash) will be ignored
     @return True if succeed, False otherwise
     '''
-    def add_synchronized(self, block_number: int, deposits: list[blockchain.EventDeposit], withdrawals: list[
-        blockchain.EventWithdraw]) -> bool:
+    def add_synchronized(self, block_number: int, deposits: list[EventDeposit], withdrawals: list[
+        EventWithdraw]) -> bool:
         raise NotImplementedError
 
     '''
@@ -115,7 +116,7 @@ class SQLite(Interface):
         self.cursor    : sqlite3.Cursor | None     = None
 
     def open(self, chain: ChainID, symbol: Symbol, unit: TornadoUnit) -> bool:
-        meta: Metadata = util.load_metadata()[chain]
+        meta: Metadata = helper_func.load_metadata()[chain]
         with self.mutex:
             # Create directory recursively if not exists
             url: str = config.DATABASE_PATHS[chain][symbol][unit]
@@ -218,8 +219,8 @@ class SQLite(Interface):
             rows: list[tuple[int, int]] | None = self._query('SELECT (SELECT COUNT(*) FROM t_event_deposit), (SELECT COUNT(*) FROM t_event_withdraw);')
         return tuple(rows[0]) if rows else None
 
-    def add_synchronized(self, block_number: int, deposits: list[blockchain.EventDeposit], withdrawals: list[
-        blockchain.EventWithdraw]) -> bool:
+    def add_synchronized(self, block_number: int, deposits: list[EventDeposit], withdrawals: list[
+        EventWithdraw]) -> bool:
         sql: list[str] = [
             f'UPDATE t_info SET latest_blk_num = {block_number} WHERE latest_blk_num < {block_number};',
             f'UPDATE t_info SET unspent_count = unspent_count + {len(deposits)} - {len(withdrawals)};',

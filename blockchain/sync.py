@@ -8,9 +8,10 @@ from hexbytes import HexBytes
 from web3 import Web3
 from web3.types import LogReceipt, Wei
 
-from . import log, rpc, util
-from .mytype import ChainID, Second, chain_to_string
-from .util import upper_first_char
+from util import log, helper_func
+from . import rpc
+from util.mytype import ChainID, Second, chain_to_string
+from util.helper_func import upper_first_char
 import config
 
 
@@ -166,7 +167,7 @@ class EventPoller(object):
         self.chain         : ChainID                   = chain
         self.connection    : rpc.Interface | None      = connection  # If True, the RPC connection is managed outside
         self.external      : bool                      = connection is not None
-        self.meta          : util.Metadata             = util.load_metadata()[chain]
+        self.meta          : helper_func.Metadata             = helper_func.load_metadata()[chain]
         self.contract      : ChecksumAddress | None    = None
         self.events        : list[LogEvent]            = [EventDeposit(), EventWithdraw()]
         self.current       : int                       = 0
@@ -333,7 +334,7 @@ class EventPoller(object):
                     self.cond.notify_all()
                 log.error(self.tag, f'Failed to get latest block number, RPC error: {self.error}')
                 log.info(self.tag, f'Wait {config.RPC_RETRY_INTERVAL_SEC}s and retry')
-                util.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
             if self.off:
                 break
             with self.cond:
@@ -384,7 +385,7 @@ class EventPoller(object):
                             self.cond.notify_all()
                         log.error(self.tag, f'Failed to get logs for event {expected.event_hash().to_0x_hex()}, RPC error: {self.error}')
                         log.info(self.tag, f'Wait {config.RPC_RETRY_INTERVAL_SEC}s and retry')
-                        util.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                        helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
                         with self.cond:
                             self.activity = EventPoller.Activity.FETCHING_EVENTS
                         result = self.connection.log_receipt(ChecksumAddress(self.contract), chunk[0], chunk[1], [expected.event_hash()])
@@ -396,7 +397,7 @@ class EventPoller(object):
                         event_logs.extend(result if result is not None else [])
                     if self.off:
                         break
-                    util.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                    helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
                 if self.off:
                     break_early = True
                     break
@@ -423,7 +424,7 @@ class EventPoller(object):
                         count_withdraw += 1
 
                 # Prevent reach the rate limit
-                util.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
+                helper_func.wait(config.RPC_RETRY_INTERVAL_SEC, self.cond)
 
                 # Log and notify
                 log.debug(self.tag, f'Polled {chunk[1] - chunk[0] + 1} blocks, from {chunk[0]} to {chunk[1]}, '

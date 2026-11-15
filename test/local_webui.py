@@ -1,10 +1,11 @@
 """Run the unchanged WebUI against the disposable Anvil Sepolia fork."""
 
+from pathlib import Path
+from web3 import Web3
 import argparse
 import asyncio
 import json
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import sys
@@ -13,11 +14,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from web3 import Web3
-
+from util import log
+from util.mytype import ChainID, Second, Symbol, TornadoUnit
 import config
-from components import log
-from components.mytype import ChainID, Second, Symbol, TornadoUnit
 import webui
 
 

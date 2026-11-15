@@ -4,10 +4,9 @@ from threading import Event
 from types import SimpleNamespace
 from typing import Iterator
 from unittest.mock import Mock
-
 import pytest
 
-from components import log
+from util import log
 
 
 @pytest.fixture

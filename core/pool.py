@@ -6,10 +6,13 @@ from web3 import Web3
 from web3.contract import Contract
 from web3.types import Nonce, Wei, TxParams
 
-from . import database, log, merkle_tree, relayer, rpc, util, wallet
-from .blockchain import EventPoller, EventDeposit, EventWithdraw
-from .mytype import ChainID, CircuitInput, Key, MerkleProof, Metadata, Note, Second, Symbol, TornadoUnit, SymbolType
-from .util import get_symbol_type, unit_to_wei, wait
+from blockchain import database, rpc
+from util import log, helper_func
+from zk import merkle_tree
+from . import relayer, wallet
+from blockchain.sync import EventPoller, EventDeposit, EventWithdraw
+from util.mytype import ChainID, CircuitInput, Key, MerkleProof, Metadata, Note, Second, Symbol, TornadoUnit, SymbolType
+from util.helper_func import get_symbol_type, unit_to_wei, wait
 import config
 import zk
 
@@ -44,7 +47,7 @@ class Tornado(EventPoller.Handler):
         self.initialized        : bool                         = False
         self.sync_only          : bool                         = False  # If True, only sync events; withdrawal is unavailable
         self.db                 : database.Interface           = database.create(database.Backend.SQLITE)
-        self.meta               : Metadata                     = util.load_metadata()[chain]
+        self.meta               : Metadata                     = helper_func.load_metadata()[chain]
         self.proxy_address      : ChecksumAddress              = self.meta.proxy_address
         self.deployment_address : ChecksumAddress              = self.meta.deployment[self.symbol][self.unit][0]
         self.proxy_contract     : Contract | rpc.Error | None  = None
@@ -506,7 +509,7 @@ class Tornado(EventPoller.Handler):
                 for e in deposits:
                     if not self.tree.add(e.commitment):
                         raise RuntimeError('on_sync() failed to update merkle tree')
-            self.last_update_sec = util.unix_timestamp()
+            self.last_update_sec = helper_func.unix_timestamp()
             for h in self.handlers:
                 h.on_sync(block_from, block_to, deposits, withdrawals)
 

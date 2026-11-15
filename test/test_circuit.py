@@ -1,13 +1,12 @@
+from web3 import Web3
+from web3.types import Wei
 import shutil
 import unittest
 
-from web3 import Web3
-from web3.types import Wei
-
-import config
-from components import merkle_tree
-from components.mytype import CircuitInput, Note
+from util.mytype import CircuitInput, Note
 from zk import circuit
+from zk import merkle_tree
+import config
 
 
 NOTE_TEXTS = (

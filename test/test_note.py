@@ -1,7 +1,7 @@
-import unittest
 from hexbytes import HexBytes
+import unittest
 
-from components.mytype import ChainID, Note, Symbol, TornadoUnit
+from util.mytype import ChainID, Note, Symbol, TornadoUnit
 
 
 class TestNote(unittest.TestCase):

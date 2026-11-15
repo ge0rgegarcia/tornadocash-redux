@@ -1,14 +1,14 @@
+from collections import deque
+from enum import Enum
+from multiprocessing.synchronize import Lock as MPLock
+from typing import Any, TextIO
 import datetime
 import multiprocessing as MP
 import os
 import sys
 import threading as TR
-from collections import deque
-from enum import Enum
-from multiprocessing.synchronize import Lock as MPLock
-from typing import Any, TextIO
 
-from . import util
+from . import helper_func
 from .mytype import MBytes, Second
 
 
@@ -134,7 +134,7 @@ class Logger(object):
     def log(self, level: Level, tag: str, message: str|list[str], color: Color, style: Style, filename: str|None, line_number: int|None) -> None:
         if LEVEL_ORDER.index(level) < LEVEL_ORDER.index(self.min_level):
             return
-        now: Second = util.unix_timestamp()
+        now: Second = helper_func.unix_timestamp()
         if 0 == self.timestamp:
             self.timestamp = now
         with self.mutex:
@@ -341,28 +341,28 @@ def get_recent(after_id: int = 0) -> list[dict]:
         return [record.copy() for record in logger.history if record['id'] > after_id]
 
 
-@util.caller_location
+@helper_func.caller_location
 def info(tag: str, message: str|list[str], color: Color = Color.NONE, style: Style = Style.NONE, filename: str = None, line_number: int = None) -> None:
     if filename is None or line_number is None:
         raise Exception('Log.Info() filename or line_number is None')
     Instance.info(tag, message, color, style, filename, line_number)
 
 
-@util.caller_location
+@helper_func.caller_location
 def error(tag: str, message: str|list[str], color: Color = Color.NONE, style: Style = Style.NONE, filename: str = None, line_number: int = None) -> None:
     if filename is None or line_number is None:
         raise Exception('Log.Error() filename or line_number is None')
     Instance.error(tag, message, color, style, filename, line_number)
 
 
-@util.caller_location
+@helper_func.caller_location
 def warn(tag: str, message: str|list[str], color: Color = Color.NONE, style: Style = Style.NONE, filename: str = None, line_number: int = None) -> None:
     if filename is None or line_number is None:
         raise Exception('Log.Warn() filename or line_number is None')
     Instance.warn(tag, message, color, style, filename, line_number)
 
 
-@util.caller_location
+@helper_func.caller_location
 def debug(tag: str, message: str|list[str], color: Color = Color.NONE, style: Style = Style.NONE, filename: str = None, line_number: int = None) -> None:
     if filename is None or line_number is None:
         raise Exception('Log.Debug() filename or line_number is None')

@@ -19,10 +19,12 @@ from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 import config
-from components import batch_tx, log, rpc, util
-from components.blockchain import EventDeposit, EventPoller, EventWithdraw
-from components.pool import Tornado
-from components.mytype import ChainID, Metadata, Note, Symbol, SymbolType, TornadoUnit, chain_to_string
+from core import batch_tx
+from util import log, helper_func
+from blockchain import rpc
+from blockchain.sync import EventDeposit, EventPoller, EventWithdraw
+from core.pool import Tornado
+from util.mytype import ChainID, Metadata, Note, Symbol, SymbolType, TornadoUnit, chain_to_string
 
 
 STATUS_MESSAGES: dict[str, str] = {
@@ -106,7 +108,7 @@ class Counters(Tornado.Handler):
 class Backend:
 
     def __init__(self, chains: set[ChainID]) -> None:
-        self.metadata   : dict[ChainID, Metadata]       = util.load_metadata()
+        self.metadata   : dict[ChainID, Metadata]       = helper_func.load_metadata()
         self.instances  : dict[str, Instance]           = {}
         self.connections: dict[ChainID, rpc.Connection] = {}
         self.stopping   : bool                          = False
@@ -203,7 +205,7 @@ class Backend:
                 'unit'              : item.unit.value,
                 'address'           : meta.deployment[item.symbol][item.unit][0],
                 'decimals'          : meta.decimals[item.symbol],
-                'native'            : util.get_symbol_type(item.symbol) == SymbolType.NATIVE,
+                'native'            : helper_func.get_symbol_type(item.symbol) == SymbolType.NATIVE,
                 'deposits_total'    : deposited,
                 'withdrawals_total' : withdrawn,
                 'anonymity_set'     : deposited,
@@ -539,7 +541,7 @@ class Backend:
                  report: Callable[[str], None]) -> dict[str, Any]:
         item.activity = 'approving'
         report(ACTIVITY_MESSAGES['approving'])
-        if util.get_symbol_type(item.symbol) != SymbolType.ERC20:
+        if helper_func.get_symbol_type(item.symbol) != SymbolType.ERC20:
             raise ValueError('Native currency does not require approval.')
         tornado: Tornado = item.tornado
         result = tornado.approve_tx(account)

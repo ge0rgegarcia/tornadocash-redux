@@ -15,8 +15,8 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from web3.types import LogReceipt, Nonce, TxData, TxReceipt, TxParams, Wei
 import threading
 
-from . import log
-from .mytype import ChainID, Key
+from util import log
+from util.mytype import ChainID, Key
 
 
 class ErrorCode(Enum):

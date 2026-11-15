@@ -1,7 +1,7 @@
+from typing import Callable
 import inspect
 import threading
 import traceback
-from typing import Callable
 
 from . import log
 from .mytype import Second

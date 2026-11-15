@@ -1,14 +1,14 @@
-from threading import Event, Lock
 from concurrent.futures import ThreadPoolExecutor
+from hexbytes import HexBytes
+from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
-
-from hexbytes import HexBytes
 import pytest
 
-from components import merkle_tree, pool, relayer
-from components.mytype import ChainID, CircuitInput, Key, MerkleProof, Note, Second, Symbol, TornadoUnit
+from core import pool, relayer
+from util.mytype import ChainID, CircuitInput, Key, MerkleProof, Note, Second, Symbol, TornadoUnit
+from zk import merkle_tree
 
 
 ACCOUNT = '0x' + '11' * 20
@@ -204,7 +204,7 @@ def test_sync_records_update_time_before_notifying(tornado: pool.Tornado, monkey
     handler: Mock = Mock(side_effect=lambda *args: observed.append(tornado.last_update_sec))
     observed: list[Second | None] = []
     tornado.handlers = [SimpleNamespace(on_sync=handler)]
-    monkeypatch.setattr(pool.util, 'unix_timestamp', clock)
+    monkeypatch.setattr(pool.helper_func, 'unix_timestamp', clock)
     deposits: list = [SimpleNamespace(commitment=HexBytes('0x55'))] if with_deposit else []
     tornado.on_sync(100, 101, deposits, [])
     assert tornado.last_update_sec == updated
@@ -219,7 +219,7 @@ def test_failed_sync_keeps_previous_update_time(tornado: pool.Tornado, monkeypat
     clock: Mock = Mock(return_value=Second(5678))
     handler: Mock = Mock()
     tornado.handlers = [SimpleNamespace(on_sync=handler)]
-    monkeypatch.setattr(pool.util, 'unix_timestamp', clock)
+    monkeypatch.setattr(pool.helper_func, 'unix_timestamp', clock)
     if failure == 'database':
         tornado.db.add_synchronized.return_value = False
     elif failure == 'tree':

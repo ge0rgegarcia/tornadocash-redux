@@ -16,7 +16,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.asyncio.server import ServerConnection, serve
 
 import webui
-from components.mytype import ChainID, Second, Symbol, TornadoUnit
+from util.mytype import ChainID, Second, Symbol, TornadoUnit
 from contracts import compiler
 
 
@@ -126,7 +126,7 @@ def backend(monkeypatch: pytest.MonkeyPatch) -> webui.Backend:
     meta = SimpleNamespace(deployment={Symbol.DAI: {
         TornadoUnit.UNIT_1: (ACCOUNT, 10), TornadoUnit.UNIT_10: (RECIPIENT, 10),
     }}, decimals={Symbol.DAI: 18})
-    monkeypatch.setattr(webui.util, 'load_metadata', lambda: {ChainID.ETHEREUM: meta})
+    monkeypatch.setattr(webui.helper_func, 'load_metadata', lambda: {ChainID.ETHEREUM: meta})
     monkeypatch.setattr(webui.log, 'get_recent', lambda after_id=0: [])
     backend = webui.Backend({ChainID.ETHEREUM})
     for item in backend.instances.values():
@@ -437,7 +437,7 @@ def test_another_instance_startup_failure_or_work_does_not_block(backend: webui.
 
 @pytest.mark.parametrize('phase', ['starting', 'connecting', 'initializing'])
 def test_startup_phases_have_unknown_progress(backend: webui.Backend, monkeypatch: pytest.MonkeyPatch, phase: str) -> None:
-    monkeypatch.setattr(webui.util, 'load_metadata', Mock(side_effect=AssertionError('Status must use the loaded metadata')))
+    monkeypatch.setattr(webui.helper_func, 'load_metadata', Mock(side_effect=AssertionError('Status must use the loaded metadata')))
     for item in backend.instances.values():
         item.tornado = None
         item.phase = phase
@@ -637,7 +637,7 @@ def test_proof_waits_before_and_after_tree_building_without_blocking_sync(backen
 def test_withdrawal_wakes_idle_poller_before_proving(backend: webui.Backend, operations: dict[str, Mock],
                                                    monkeypatch: pytest.MonkeyPatch, method: str, age: int) -> None:
     monkeypatch.setattr(webui.config, 'BLOCKCHAIN_LOG_EVENT_POLL_INTERVAL_SEC', 600)
-    monkeypatch.setattr(webui.util, 'wait', lambda *args: None)
+    monkeypatch.setattr(webui.helper_func, 'wait', lambda *args: None)
     head, persisted = [100], []
     idle, writing, release, cancelled = (threading.Event() for _ in range(4))
     connection: SimpleNamespace = SimpleNamespace(started=lambda: True, latest_block_number=lambda: head[0], log_receipt=lambda *args: [])

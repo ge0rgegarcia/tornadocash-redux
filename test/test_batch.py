@@ -1,21 +1,21 @@
 from concurrent.futures import ThreadPoolExecutor
-import json
-import time
+from hexbytes import HexBytes
 from pathlib import Path
+from solcx.exceptions import SolcError
 from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import Mock, PropertyMock
-
-from hexbytes import HexBytes
-import pytest
-from solcx.exceptions import SolcError
 from web3 import Web3
 from web3.exceptions import ContractLogicError
+import json
+import pytest
+import time
 
-from components import batch_tx, rpc
-from components.pool import Tornado
-from components.mytype import ChainID, MerkleProof, Note, Symbol, TornadoUnit
+from blockchain import rpc
 from contracts import compiler
+from core import batch_tx
+from core.pool import Tornado
+from util.mytype import ChainID, MerkleProof, Note, Symbol, TornadoUnit
 import config
 
 

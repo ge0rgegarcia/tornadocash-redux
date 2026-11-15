@@ -6,8 +6,8 @@ from hexbytes import HexBytes
 import pytest
 from web3.exceptions import ContractCustomError, ContractLogicError, ContractPanicError
 
-from components import rpc
-from components.mytype import ChainID
+from blockchain import rpc
+from util.mytype import ChainID
 
 
 HASH = HexBytes('0x' + '11' * 32)

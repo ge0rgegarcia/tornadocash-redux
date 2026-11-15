@@ -1,13 +1,13 @@
 from enum import Enum
 from hexbytes import HexBytes
+from typing import Protocol
 from zkmath import field
 from zkmath import hash
 import threading
 import time
-from typing import Protocol
 
-from . import log
-from .mytype import MerkleProof
+from util import log
+from util.mytype import MerkleProof
 
 
 class ImplType(Enum):

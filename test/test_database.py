@@ -4,9 +4,9 @@ from hexbytes import HexBytes
 import pytest
 
 import config
-from components.blockchain import EventDeposit, EventWithdraw
-from components.database import SQLite
-from components.mytype import ChainID, Symbol, TornadoUnit
+from blockchain.sync import EventDeposit, EventWithdraw
+from blockchain.database import SQLite
+from util.mytype import ChainID, Symbol, TornadoUnit
 
 
 def test_event_counts_use_persisted_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

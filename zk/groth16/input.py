@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+from hexbytes import HexBytes
 from typing import TypeAlias
 
-from hexbytes import HexBytes
-
-from components.mytype import CircuitInput
+from util.mytype import CircuitInput
 
 
 WitnessValue: TypeAlias = int | list[int]

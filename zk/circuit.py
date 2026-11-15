@@ -1,14 +1,14 @@
+from enum import Enum
+from hexbytes import HexBytes
 import json
 import os
 import subprocess
-from enum import Enum
-from hexbytes import HexBytes
 
-from components import log
-from components.mytype import CircuitInput
+from util import log
+from util.mytype import CircuitInput
 from zk.groth16.input import prepare_circuit_input
 from zk.groth16.prover import prove as prove_witness
-from zk.groth16.serialization import SOLIDITY_PROOF_SIZE, parse_proof, solidity_proof_bytes
+from zk.groth16.serialization import parse_proof, SOLIDITY_PROOF_SIZE, solidity_proof_bytes
 from zk.groth16.verifier import verify as verify_proof
 from zk.groth16.witness import calculate_witness
 

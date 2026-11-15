@@ -1,18 +1,16 @@
 """Exercise the real batch CLI and Groth16 proofs on the running local fork."""
 
+from eth_account import Account
+from pathlib import Path
+from web3 import Web3
 import argparse
 import json
-from pathlib import Path
 
-from local_webui import ROOT, configure
-
-from web3 import Web3
-from eth_account import Account
-
+from local_webui import configure, ROOT
+from util import log
+from util.mytype import Key
 import cli
 import config
-from components import log
-from components.mytype import Key
 
 
 def main(state: Path) -> None:

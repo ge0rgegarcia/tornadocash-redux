@@ -1,12 +1,12 @@
-import unittest
 from concurrent.futures import ThreadPoolExecutor
 from hexbytes import HexBytes
-from zkmath import hash
 from threading import Event
 from unittest.mock import patch
+from zkmath import hash
+import unittest
 
-from components import merkle_tree
-from components.mytype import MerkleProof
+from util.mytype import MerkleProof
+from zk import merkle_tree
 
 
 class TestMerkleTree(unittest.TestCase):

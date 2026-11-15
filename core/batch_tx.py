@@ -1,16 +1,18 @@
-from pathlib import Path
-from typing import Any
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
+from pathlib import Path
+from typing import Any
 from web3 import Web3
 from web3.contract import Contract
 from web3.exceptions import ContractLogicError
 from web3.types import Nonce, TxParams, Wei
 
-from contracts import compiler
-from . import log, rpc, util, wallet
+from . import wallet
 from .pool import Tornado
-from .mytype import ChainID, Key, Note, Symbol, SymbolType
+from blockchain import rpc
+from contracts import compiler
+from util import helper_func, log
+from util.mytype import ChainID, Key, Note, Symbol, SymbolType
 import config
 
 
@@ -86,8 +88,8 @@ def token_amounts(deposits: list[tuple[Tornado, HexBytes]]) -> dict[Symbol, Wei]
     _first(deposits)
     amounts: dict[Symbol, Wei] = {}
     for tornado, _ in deposits:
-        if util.get_symbol_type(tornado.symbol) == SymbolType.ERC20:
-            amount: Wei = util.unit_to_wei(tornado.unit, tornado.meta.decimals[tornado.symbol])
+        if helper_func.get_symbol_type(tornado.symbol) == SymbolType.ERC20:
+            amount: Wei = helper_func.unit_to_wei(tornado.unit, tornado.meta.decimals[tornado.symbol])
             amounts[tornado.symbol] = Wei(amounts.get(tornado.symbol, 0) + amount)
     return amounts
 
@@ -97,7 +99,7 @@ def deploy_tx(deposits: list[tuple[Tornado, HexBytes]], account: ChecksumAddress
     first = _first(deposits)
     if not token_amounts(deposits):
         raise ValueError('This batch does not need a batch contract.')
-    mixed = any(util.get_symbol_type(tornado.symbol) == SymbolType.NATIVE for tornado, _ in deposits)
+    mixed = any(helper_func.get_symbol_type(tornado.symbol) == SymbolType.NATIVE for tornado, _ in deposits)
     abi, bytecode = compiler.batch_depositor_artifact(Path(config.BATCH_CONTRACTS_PATH), mixed, first._progress)
     contract = first.connection.get_contract(None, abi, bytecode=bytecode)
     return _build(first, contract, None, (first.proxy_address,), account, nonce)
@@ -123,8 +125,8 @@ def deposit_tx(deposits: list[tuple[Tornado, HexBytes]], account: ChecksumAddres
     groups: dict[ChecksumAddress, list[tuple[ChecksumAddress, HexBytes]]] = {}
     value: int = 0
     for tornado, commitment in deposits:
-        native: bool = util.get_symbol_type(tornado.symbol) == SymbolType.NATIVE
-        amount: Wei = util.unit_to_wei(tornado.unit, tornado.meta.decimals[tornado.symbol])
+        native: bool = helper_func.get_symbol_type(tornado.symbol) == SymbolType.NATIVE
+        amount: Wei = helper_func.unit_to_wei(tornado.unit, tornado.meta.decimals[tornado.symbol])
         value += amount if native else 0
         if erc20:
             token: ChecksumAddress = Web3.to_checksum_address('0x' + '00' * 20) if native else tornado.meta.token_address[tornado.symbol]

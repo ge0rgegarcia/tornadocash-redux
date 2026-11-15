@@ -10,11 +10,12 @@ from hexbytes import HexBytes
 from web3 import Web3
 from web3.types import TxReceipt
 
-from components import log, rpc, util
-from components import batch_tx
-from components.blockchain import EventDeposit, EventWithdraw
-from components.pool import Tornado
-from components.mytype import ChainID, Key, Metadata, Note, Second, Symbol, TornadoUnit, chain_to_string, string_to_chain
+from util import log, helper_func
+from blockchain import rpc
+from core import batch_tx
+from blockchain.sync import EventDeposit, EventWithdraw
+from core.pool import Tornado
+from util.mytype import ChainID, Key, Metadata, Note, Second, Symbol, TornadoUnit, chain_to_string, string_to_chain
 import config
 
 
@@ -176,7 +177,7 @@ def handle_option(enabled_arg: str, args: argparse.Namespace) -> None:
         except ValueError as e:
             log.error(tag, f'Invalid arguments for --keep: {args.keep}, exception: {e}')
             return
-        meta: Metadata = util.load_metadata().get(chain)
+        meta: Metadata = helper_func.load_metadata().get(chain)
         if meta is None:
             log.error(tag, f'Unsupported chain: {chain_to_string(chain)}')
             return
@@ -281,7 +282,7 @@ def handle_option(enabled_arg: str, args: argparse.Namespace) -> None:
         chain, symbol, unit, note = parsed
         log.info(tag, f'Note detail:\n'
                       f'  Invoice       : {Note.to_invoice(chain, symbol, unit, note)}\n'
-                      f'  Chain         : {util.upper_first_char(chain_to_string(chain))}({hex(chain.value)})\n'
+                      f'  Chain         : {helper_func.upper_first_char(chain_to_string(chain))}({hex(chain.value)})\n'
                       f'  Symbol        : {symbol.value.upper()}\n'
                       f'  Unit          : {unit.value}\n'
                       f'  Nullifier     : 0x{note.nullifier.hex().zfill(62)}\n'
@@ -319,10 +320,10 @@ def _sync(tornado: Tornado, keep: bool, signal: threading.Condition | None = Non
         def on_latest_block(self, block_number: int) -> None:
             nonlocal latest_block
             latest_block = block_number
-    handler: Handler = Handler(f'{util.upper_first_char(chain_to_string(tornado.chain))}@{tornado.unit.value}{tornado.symbol.value.upper()}')
+    handler: Handler = Handler(f'{helper_func.upper_first_char(chain_to_string(tornado.chain))}@{tornado.unit.value}{tornado.symbol.value.upper()}')
     tornado.add_handler(handler)
     if tornado.start_sync():
-        util.wait(Second(0), signal, True)
+        helper_func.wait(Second(0), signal, True)
         tornado.stop_sync()
     tornado.remove_all_handlers()
     if not catch_up_bool:
@@ -342,7 +343,7 @@ def sync_events(chain: ChainID, symbol: Symbol, unit: TornadoUnit, keep: bool) -
 
 def sync_all_events(keep: bool) -> None:
     # Load metadata
-    meta_data: dict[ChainID, Metadata] = util.load_metadata()
+    meta_data: dict[ChainID, Metadata] = helper_func.load_metadata()
     # Create RPC connections
     connections: dict[ChainID, rpc.Interface] = {}
     def _stop_all_rpc() -> None:
@@ -371,7 +372,7 @@ def sync_all_events(keep: bool) -> None:
     for tornado in instances:
         if not tornado.init(sync_only=True):
             succeed = False
-            log.error(tag, f'Failed to initialize {util.upper_first_char(chain_to_string(tornado.chain))} {tornado.unit.value} {tornado.symbol.value}, skip it')
+            log.error(tag, f'Failed to initialize {helper_func.upper_first_char(chain_to_string(tornado.chain))} {tornado.unit.value} {tornado.symbol.value}, skip it')
             break
         initialized.append(tornado)
     # If any instance failed to initialize, un-initialize all and return
@@ -388,7 +389,7 @@ def sync_all_events(keep: bool) -> None:
             try:
                 _sync(_t, keep, _s)
             except KeyboardInterrupt:
-                log.warn(tag, f'{util.upper_first_char(chain_to_string(_t.chain))}@{_t.unit.value}{_t.symbol.value.upper()}, interrupted')
+                log.warn(tag, f'{helper_func.upper_first_char(chain_to_string(_t.chain))}@{_t.unit.value}{_t.symbol.value.upper()}, interrupted')
         signal: threading.Condition = threading.Condition()
         thread: threading.Thread    = threading.Thread(target=lambda t=tornado, s=signal: job(t, s))
         thread.start()
@@ -451,7 +452,7 @@ def _save_deposit_note(tornado: Tornado, note: Note, index: int | None = None) -
 
 
 def _deposit(key: Key, tornado: Tornado, invoice: HexBytes | None = None) -> HexBytes | None:
-    log.info(tag, f'Depositing {util.upper_first_char(chain_to_string(tornado.chain))} {tornado.unit.value} {tornado.symbol.value.upper()}')
+    log.info(tag, f'Depositing {helper_func.upper_first_char(chain_to_string(tornado.chain))} {tornado.unit.value} {tornado.symbol.value.upper()}')
     note: Note | None = Note.create() if invoice is None else None
     commitment: HexBytes = note.commitment if note is not None else invoice
     backup_path: str | None = _save_deposit_note(tornado, note) if note is not None else None
@@ -479,7 +480,7 @@ def _wait_batch_receipt(connection: rpc.Interface, tx_hash: HexBytes, operation:
             delay = min(delay, deadline - monotonic())
             if delay <= 0:
                 break
-        util.wait(Second(delay))
+        helper_func.wait(Second(delay))
         if deadline is not None and monotonic() >= deadline:
             break
         receipt: TxReceipt | rpc.Error = connection.transaction_receipt(tx_hash)
@@ -593,7 +594,7 @@ def deposit_batch(key: Key, batch: str) -> None:
                         if not tornado.init(sync_only=True):
                             return
                         for _ in range(count):
-                            log.info(tag, f'Depositing {util.upper_first_char(chain_to_string(chain))} {unit.value} {symbol.value.upper()}')
+                            log.info(tag, f'Depositing {helper_func.upper_first_char(chain_to_string(chain))} {unit.value} {symbol.value.upper()}')
                             note: Note = Note.create()
                             backup_path: str | None = _save_deposit_note(tornado, note, len(deposits) + 1)
                             if backup_path is None:
@@ -737,12 +738,12 @@ def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: 
                     if tx_hash is None:
                         continue
                     log.info(tag, f'Wait 15 seconds for withdrawal transaction to be mined ...')
-                    util.wait(Second(15))
+                    helper_func.wait(Second(15))
                     while True:
                         receipt: TxReceipt | rpc.Error = connections[chain].transaction_receipt(tx_hash)
                         if rpc.is_error(receipt):
                             log.warn(tag, f'Wait 5 seconds for withdrawal transaction to be mined, RPC error: {receipt.code.value}')
-                            util.wait(Second(5))
+                            helper_func.wait(Second(5))
                             continue
                         if receipt is not None and receipt['blockNumber'] is not None:
                             if receipt['status'] != 1:
@@ -752,7 +753,7 @@ def withdraw_batch(notes_text: str, recipient: ChecksumAddress, key_or_relayer: 
                                           f'tx_hash: {tx_hash.to_0x_hex()}, recipient: {recipient}', log.Color.CYAN, log.Style.BOLD)
                             break
                         log.info(tag, f'Wait 5 seconds for withdrawal transaction to be mined ...')
-                        util.wait(Second(5))
+                        helper_func.wait(Second(5))
                 tornado.un_init()
     # Stop RPC connections
     for conn in connections.values():

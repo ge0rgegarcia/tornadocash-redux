@@ -1,13 +1,12 @@
 from hashlib import sha256
-import json
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-import threading
 from typing import Callable
-
+import json
 import solcx
+import threading
 
-from components import log
+from util import log
 
 
 SOLC_VERSION = '0.8.30'

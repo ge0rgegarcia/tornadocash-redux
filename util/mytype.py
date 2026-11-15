@@ -4,14 +4,14 @@ from enum import Enum
 from eth_keys.datatypes import PrivateKey, PublicKey
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
-from zkmath import ec
-from zkmath import hash
-from zkmath import random
 from typing import Union
 from web3 import Web3
 from web3.types import Wei
-import zkmath
+from zkmath import ec
+from zkmath import hash
+from zkmath import random
 import re
+import zkmath
 
 
 class MBytes(int):

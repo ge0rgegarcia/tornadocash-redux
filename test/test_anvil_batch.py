@@ -1,16 +1,17 @@
+from eth_account import Account
+from hexbytes import HexBytes
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-
-from eth_account import Account
-from hexbytes import HexBytes
 import pytest
 import solcx
 
-from components import batch_tx, rpc, util
-from components.pool import Tornado
-from components.mytype import ChainID, Key, Symbol, TornadoUnit
+from blockchain import rpc
 from contracts import compiler
+from core import batch_tx
+from core.pool import Tornado
+from util import helper_func
+from util.mytype import ChainID, Key, Symbol, TornadoUnit
 import cli
 import config
 import webui
@@ -55,7 +56,7 @@ def environment(anvil, compiled):
             metadata.decimals[symbol] = decimals
         token = tokens.get(symbol)
         address = token.address if token else '0x' + '00' * 20
-        pool = deploy('TestPool', address, util.unit_to_wei(unit, decimals))
+        pool = deploy('TestPool', address, helper_func.unit_to_wei(unit, decimals))
         proxy.functions.addPool(pool.address).transact({'from': account})
         pools[pool.address] = pool
         result = object.__new__(Tornado)
@@ -231,7 +232,7 @@ def test_reverted_anvil_transactions_hide_reasons_from_webui_and_cli(environment
     info, error = Mock(), Mock()
     monkeypatch.setattr(cli.log, 'info', info)
     monkeypatch.setattr(cli.log, 'error', error)
-    monkeypatch.setattr(cli.util, 'wait', lambda _: None)
+    monkeypatch.setattr(cli.helper_func, 'wait', lambda _: None)
     with patch.object(env.connection, 'transaction_revert_reason', wraps=env.connection.transaction_revert_reason) as trace:
         assert cli._wait_batch_receipt(env.connection, receipt['transactionHash'], 'Withdrawal') is None
         trace.assert_not_called()
