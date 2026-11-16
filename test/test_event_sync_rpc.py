@@ -28,7 +28,7 @@ def connection() -> SimpleNamespace:
 def receipt(address: str, block: int, index: int, topic: HexBytes = DEPOSIT) -> LogReceipt:
     return {
         'address': address,
-        'blockHash': HexBytes(block.to_bytes(32)),
+        'blockHash': HexBytes(block.to_bytes(32, 'big')),
         'blockNumber': block,
         'data': HexBytes(b''),
         'logIndex': index,
