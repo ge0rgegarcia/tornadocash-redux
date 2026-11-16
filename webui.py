@@ -1,5 +1,7 @@
 """Local WebSocket backend; www/ is an independent static frontend."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from eth_typing import ChecksumAddress
 from functools import partial
@@ -676,11 +678,16 @@ async def handle_client(socket: ServerConnection, backend: Backend) -> None:
 
 class HTTPHandler(SimpleHTTPRequestHandler):
 
+    _log_escape_table = {
+        **{code: f'\\x{code:02x}' for code in (*range(0x20), *range(0x7f, 0xa0))},
+        ord('\\'): '\\\\',
+    }
+
     def log_message(self, format: str, *args: Any) -> None:
-        log.info('HTTP', f'{self.address_string()} {format % args}'.translate(self._control_char_table))
+        log.info('HTTP', f'{self.address_string()} {format % args}'.translate(self._log_escape_table))
 
     def log_error(self, format: str, *args: Any) -> None:
-        log.error('HTTP', f'{self.address_string()} {format % args}'.translate(self._control_char_table))
+        log.error('HTTP', f'{self.address_string()} {format % args}'.translate(self._log_escape_table))
 
 
 async def run() -> None:

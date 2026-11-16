@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from concurrent.futures import ThreadPoolExecutor
 from hexbytes import HexBytes
 from types import SimpleNamespace

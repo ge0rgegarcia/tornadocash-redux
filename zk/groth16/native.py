@@ -120,7 +120,7 @@ def msm_batch(
     if len(results) != len(requests):
         raise RuntimeError("MSM batch changed the request count")
     normalized = []
-    for index, ((prepared, _), result) in enumerate(zip(requests, results, strict=True)):
+    for index, ((prepared, _), result) in enumerate(zip(requests, results)):
         group = getattr(prepared, "group", None)
         if group not in ("g1", "g2"):
             raise RuntimeError(f"MSM request {index} has an invalid group")

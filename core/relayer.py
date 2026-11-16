@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
 from requests import Response

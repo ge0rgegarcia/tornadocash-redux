@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from hexbytes import HexBytes
-from typing import TypeAlias
+from typing import Union
 
 from util.mytype import CircuitInput
 
 
-WitnessValue: TypeAlias = int | list[int]
+WitnessValue = Union[int, list[int]]
 
 
 def _address_to_int(value: str) -> int:

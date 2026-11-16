@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from hexbytes import HexBytes
 from web3.types import TxParams
 

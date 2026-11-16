@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import deque
 from enum import Enum
 from multiprocessing.synchronize import Lock as MPLock

@@ -59,7 +59,7 @@ Similar to the original [tornado-cli](https://github.com/tornadocash/tornado-cli
 
 ### Download Code
 
-Requires Python `3.10+`; Python `3.14` is recommended.  
+Requires Python `3.9+`; Python `3.14` is recommended.
 
 Clone this repository and install dependencies    
     

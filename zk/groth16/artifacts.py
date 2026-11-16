@@ -45,8 +45,14 @@ class ArtifactFormatError(ValueError):
     """Raised when a proving key is truncated, corrupt, or incompatible."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ProvingKeyHeader:
+    __slots__ = (
+        "n_signals", "n_public", "domain_size", "pols_a_offset", "pols_b_offset",
+        "points_a_offset", "points_b1_offset", "points_b2_offset",
+        "points_c_offset", "points_h_offset",
+    )
+
     n_signals: int
     n_public: int
     domain_size: int
@@ -73,20 +79,26 @@ class ProvingKeyHeader:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class G1Affine:
+    __slots__ = ("x", "y")
+
     x: int
     y: int
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class G2Affine:
+    __slots__ = ("x", "y")
+
     x: tuple[int, int]
     y: tuple[int, int]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class SparseTerm:
+    __slots__ = ("index", "coefficient")
+
     index: int
     coefficient: int
 

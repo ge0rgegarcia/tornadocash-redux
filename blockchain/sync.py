@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -5,7 +7,7 @@ from enum import Enum
 from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
 from time import monotonic
-from typing import Callable, TypeAlias, TypeVar
+from typing import Callable, TypeVar
 from web3 import Web3
 from web3.types import LogReceipt, Wei
 import threading
@@ -141,10 +143,10 @@ class EventWithdraw(LogEvent):
         return Web3.keccak(text='Withdrawal(address,bytes32,address,uint256)')
 
 
-Topics    : TypeAlias = tuple[HexBytes, ...]
-Logs      : TypeAlias = list[LogReceipt]
-LogKey    : TypeAlias = tuple[object, int, int, Topics]
-LogRequest: TypeAlias = tuple[frozenset[ChecksumAddress], int, int, Topics]
+Topics     = tuple[HexBytes, ...]
+Logs       = list[LogReceipt]
+LogKey     = tuple[object, int, int, Topics]
+LogRequest = tuple[frozenset[ChecksumAddress], int, int, Topics]
 
 Result = TypeVar('Result')
 

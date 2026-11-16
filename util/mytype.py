@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec as crypto_ec
 from enum import Enum

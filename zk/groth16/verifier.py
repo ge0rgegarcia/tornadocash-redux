@@ -43,8 +43,10 @@ DEFAULT_VERIFICATION_KEY_PATH = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class VerificationKey:
+    __slots__ = ("alpha_1", "beta_2", "gamma_2", "delta_2", "ic", "alpha_beta_miller")
+
     alpha_1: G1Point
     beta_2: G2Point
     gamma_2: G2Point
@@ -137,12 +139,11 @@ def verify(proof: Any) -> bool:
         validate_solidity_block(proof, parsed)
         verification_key = _load_verification_key()
 
+        ic_points = verification_key.ic[1:]
+        if len(ic_points) != len(parsed.public_signals):
+            return False
         public_key = verification_key.ic[0]
-        for ic_point, signal in zip(
-            verification_key.ic[1:],
-            parsed.public_signals,
-            strict=True,
-        ):
+        for ic_point, signal in zip(ic_points, parsed.public_signals):
             public_key = add(public_key, multiply(ic_point, signal))
 
         # Move all terms to the left side of the Groth16 equation.  Each

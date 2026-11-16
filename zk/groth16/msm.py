@@ -70,18 +70,17 @@ def query_msms(
     workers: int,
 ) -> dict[str, Any]:
     witness_buffer = native.pack_fr(witness)
-    requests = tuple(
-        zip(
-            _prepared_queries(key),
-            (witness_buffer,) * 3
-            + (native.pack_fr(private_witness), native.pack_fr(h)),
-            strict=True,
-        )
-    )
+    prepared_queries = _prepared_queries(key)
+    scalar_buffers = (witness_buffer,) * 3 + (native.pack_fr(private_witness), native.pack_fr(h))
+    if len(prepared_queries) != len(scalar_buffers):
+        raise ValueError("MSM query and scalar buffer counts differ")
+    requests = tuple(zip(prepared_queries, scalar_buffers))
     results = native.msm_batch(_executor(workers), requests)
+    if len(results) != len(_QUERY_SPECS):
+        raise ValueError("MSM query and result counts differ")
     return {
         name: _point(result, g2=g2)
-        for (name, _, g2), result in zip(_QUERY_SPECS, results, strict=True)
+        for (name, _, g2), result in zip(_QUERY_SPECS, results)
     }
 
 

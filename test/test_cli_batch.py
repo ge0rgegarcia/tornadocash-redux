@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from hexbytes import HexBytes
 from pathlib import Path
 from threading import Event

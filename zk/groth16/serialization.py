@@ -5,19 +5,21 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from py_ecc.optimized_bn128 import curve_order, FQ, FQ2, field_modulus, is_inf, normalize
-from typing import Any, TypeAlias
+from typing import Any
 
 
 PUBLIC_INPUT_COUNT = 6
 SOLIDITY_PROOF_SIZE = 8 * 32
 
-G1Point: TypeAlias = tuple[FQ, FQ, FQ]
-G2Point: TypeAlias = tuple[FQ2, FQ2, FQ2]
+G1Point = tuple[FQ, FQ, FQ]
+G2Point = tuple[FQ2, FQ2, FQ2]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ParsedProof:
     """A canonical Groth16 proof converted to ``py_ecc`` field values."""
+
+    __slots__ = ("a", "b", "c", "public_signals")
 
     a: G1Point
     b: G2Point

@@ -70,8 +70,10 @@ def _ensure_recursion_budget() -> None:
             sys.setrecursionlimit(_MIN_WITNESS_RECURSION_LIMIT)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _Component:
+    __slots__ = ("name", "params", "template", "input_signals")
+
     name: str
     params: Mapping[str, Any]
     template: str
@@ -199,7 +201,7 @@ class _RuntimeContext:
             )
         previous_scopes = self.scopes
         global_scope = previous_scopes[0] if previous_scopes else {}
-        self.scopes = [global_scope, dict(zip(names, params, strict=True))]
+        self.scopes = [global_scope, dict(zip(names, params))]
         try:
             return function(self)
         finally:
@@ -321,7 +323,7 @@ def _validate_zkmath(inputs: Mapping[str, Any], commitment: int) -> None:
     path_indices = inputs["pathIndices"]
     if len(path_elements) != 20 or len(path_indices) != 20:
         raise WitnessError("Tornado circuit requires exactly 20 Merkle path levels")
-    for sibling, index in zip(path_elements, path_indices, strict=True):
+    for sibling, index in zip(path_elements, path_indices):
         if int(index) not in (0, 1):
             raise WitnessError("Merkle path indices must be zero or one")
         pair = (current, int(sibling)) if int(index) == 0 else (int(sibling), current)

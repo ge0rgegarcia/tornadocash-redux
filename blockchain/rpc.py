@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from enum import Enum
 from eth_abi import decode
@@ -7,7 +9,7 @@ from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
 from requests import Response
 from requests.exceptions import SSLError, Timeout
-from typing import Any, Callable, TYPE_CHECKING, TypeAlias
+from typing import Any, Callable, TYPE_CHECKING, Union
 from web3 import Web3
 from web3.contract import Contract
 from web3.datastructures import AttributeDict
@@ -26,8 +28,8 @@ if TYPE_CHECKING:
     from web3.providers.rpc.utils import ExceptionRetryConfiguration
 
 
-LogAddresses: TypeAlias = ChecksumAddress | list[ChecksumAddress]
-LogTopics   : TypeAlias = Sequence[HexBytes | Sequence[HexBytes] | None]
+LogAddresses = Union[ChecksumAddress, list[ChecksumAddress]]
+LogTopics    = Sequence[Union[HexBytes, Sequence[HexBytes], None]]
 
 
 class ErrorCode(Enum):

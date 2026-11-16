@@ -52,7 +52,7 @@ def _construct_evaluations(
     if len(witness) != len(polynomials):
         raise ValueError("witness and sparse polynomial tables differ in length")
     evaluations = [0] * domain_size
-    for signal, terms in zip(witness, polynomials, strict=True):
+    for signal, terms in zip(witness, polynomials):
         scalar = int(signal) % FR_MODULUS
         if scalar == 0:
             continue
